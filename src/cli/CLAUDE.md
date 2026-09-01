@@ -13,15 +13,7 @@
 - **JSONL 직접 파싱.** 반드시 `src/core/`를 경유한다
 - 그래프·세그먼트 판정 로직 재구현. 웹과 답이 갈리는 원인이 된다
 
-## 명령
-
-```
-sessgraph inspect <file>     # 조각·root·orphan 리포트
-sessgraph serve <file>       # 읽기 전용 웹 뷰어 기동
-sessgraph reattach <file> --uuid X --parent Y --reason "..."
-sessgraph verify <file>      # leaf → root 역추적 길이
-sessgraph revert <file>      # 백업 복원
-```
+명령 목록은 [README.md](../../README.md#예정-명령)를 참고한다 (SSOT). 여기서 재기술하지 않는다.
 
 ## 쓰기 규칙 (반드시 준수)
 
