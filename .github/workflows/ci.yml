@@ -1,0 +1,37 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # ADR 불변성 검사가 base 브랜치와 diff하므로 전체 이력이 필요하다.
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: 문서 거버넌스 검사
+        run: npm run lint:docs
+
+      - name: 포맷 검사
+        run: npm run format:check
+
+      - name: 타입 검사
+        run: npm run type-check
+
+      - name: 테스트 (골든 픽스처 회귀 포함)
+        run: npm test
+
+      - name: 빌드
+        run: npm run build

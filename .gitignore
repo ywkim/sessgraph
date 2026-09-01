@@ -1,0 +1,15 @@
+node_modules/
+dist/
+*.tsbuildinfo
+
+# 실제 세션 파일은 절대 커밋하지 않는다 (자격증명·개인정보 포함).
+# 이 리포는 public이다 — CLAUDE.md "픽스처 정책" 참고.
+*.jsonl
+!test/fixtures/*.anon.jsonl
+*.jsonl.bak
+*.bak.*
+*.surgery.log
+
+.DS_Store
+.env
+.env.*

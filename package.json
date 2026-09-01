@@ -1,0 +1,33 @@
+{
+  "name": "sessgraph",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Claude Code 세션 JSONL의 구조를 색인해 끊긴 체인을 진단하고 이어붙이는 도구",
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "bin": {
+    "sessgraph": "dist/cli/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "type-check": "tsc --noEmit",
+    "test": "node --test",
+    "lint": "eslint .",
+    "format": "prettier --write \"**/*.{ts,js,json,md}\"",
+    "format:check": "prettier --check \"**/*.{ts,js,json,md}\"",
+    "lint:docs": "npm run lint:docs:prd && npm run lint:docs:design && npm run lint:docs:adr && npm run lint:docs:structure",
+    "lint:docs:prd": "node scripts/lint-prd-purity.js",
+    "lint:docs:design": "node scripts/lint-design-doc.js",
+    "lint:docs:adr": "node scripts/check-adr-immutable.js",
+    "lint:docs:structure": "node scripts/validate-doc-structure.js --type=prd && node scripts/validate-doc-structure.js --type=design && node scripts/validate-doc-structure.js --type=spec"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "js-yaml": "^4.1.0",
+    "prettier": "^3.4.0",
+    "typescript": "^5.7.0"
+  }
+}
