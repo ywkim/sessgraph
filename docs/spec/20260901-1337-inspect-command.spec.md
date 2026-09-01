@@ -20,6 +20,7 @@ sessgraph inspect <file> [--json] [--duplicate-policy=<policy>]
 - `--duplicate-policy`: 선택. `first-wins | last-wins | prefer-parent` 중 하나. 미지정 시 기본값은 아래 "데이터 모델"에서 정의하는 `DuplicatePolicy` 기본값을 따른다
 
 종료 코드:
+
 - `0`: 정상 실행 (orphan이 있어도 0 — orphan 발견은 도구 오류가 아니다)
 - `1`: 예약 (현재 `inspect`는 사용하지 않음. 향후 `--fail-on-orphan` 같은 플래그가 추가되면 사용)
 - `2`: 도구 오류 — 파일 없음, 또는 아래 "엣지 케이스" 불변식 위반
