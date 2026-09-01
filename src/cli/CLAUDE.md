@@ -1,0 +1,51 @@
+# CLAUDE.md — src/cli/
+
+명령줄 인터페이스. **파일을 쓰는 유일한 스코프.**
+
+## 이 스코프의 책임
+
+- 인자 파싱, 사람이 읽는 출력 포매팅
+- `src/core/`의 결과를 리포트로 변환
+- 세션 파일 수정 (백업·원자적 교체·수술 로그 포함)
+
+## 이 스코프가 하지 않는 것
+
+- **JSONL 직접 파싱.** 반드시 `src/core/`를 경유한다
+- 그래프·세그먼트 판정 로직 재구현. 웹과 답이 갈리는 원인이 된다
+
+## 명령
+
+```
+sessgraph inspect <file>     # 조각·root·orphan 리포트
+sessgraph serve <file>       # 읽기 전용 웹 뷰어 기동
+sessgraph reattach <file> --uuid X --parent Y --reason "..."
+sessgraph verify <file>      # leaf → root 역추적 길이
+sessgraph revert <file>      # 백업 복원
+```
+
+## 쓰기 규칙 (반드시 준수)
+
+[ADR-0002](../../docs/adr/ADR-0002-record-preserving-reattach.md), [ADR-0003](../../docs/adr/ADR-0003-cli-writes-web-reads.md) 근거:
+
+1. **기본은 dry-run.** `--commit` 플래그가 있어야 실제로 쓴다
+2. **레코드를 삭제·삽입하지 않는다.** `parentUuid` 값 변경만 수행한다
+3. 쓰기 전 **타임스탬프 붙은 백업**을 만든다 (`{file}.bak.{YYYYMMDDTHHmm}`). 기존 백업을 덮어쓰지 않는다 — 유일본을 잃으면 복구 불가다
+4. 임시 파일에 쓴 뒤 `rename`으로 원자적 교체. 원본을 제자리에서 수정하지 않는다
+5. `{file}.surgery.log`에 append-only 한 줄을 남긴다 — 시각, 대상 uuid, 이전/이후 부모, 사유, 백업 경로
+6. `--reason`은 필수다. 왜 그 지점을 골랐는지가 남지 않으면 나중에 백업 diff를 역추적해야 한다
+
+## 보고 규칙
+
+**구조적 성공을 실질 성공으로 보고하지 않는다.**
+
+체인 길이가 정상화된 것과, 재개 후 모델이 실제로 그 내용을 기억하는 것은 별개다. 후자가 실패한 사례가 실제로 관측됐다 ([ADR-0002](../../docs/adr/ADR-0002-record-preserving-reattach.md)).
+
+`verify`는 체인 길이까지만 보고하고, 회상 검증은 재개 후 사람이 직접 해야 한다고 안내한다. "복구 성공" 같은 단정을 출력하지 않는다.
+
+## 종료 코드
+
+- `0` 성공
+- `1` 검사 실패 (orphan 발견 등 — 도구는 정상 동작)
+- `2` 도구 오류 (파일 없음, 스키마 이상 등)
+
+검사 실패와 도구 오류를 같은 코드로 뭉뚱그리지 않는다.
