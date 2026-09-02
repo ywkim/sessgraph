@@ -80,3 +80,121 @@ export interface UnresolvedDuplicate {
   readonly conflictingParents: readonly (string | null)[];
   readonly lineNos: readonly number[];
 }
+
+/* ── inspect (docs/spec/20260901-1337-inspect-command.spec.md) ────────────── */
+
+/**
+ * 컴팩트 경계로 나뉜 하나의 조각.
+ *
+ * orphan은 세그먼트 root가 되지 않는다 — root는 `parentUuid`가 `null`인 노드이고,
+ * orphan은 존재하지 않는 부모를 가리키는 노드다.
+ */
+export interface Segment {
+  readonly rootUuid: string;
+  readonly leafUuid: string;
+  readonly nodeCount: number;
+  readonly startTimestamp: string | null;
+  readonly endTimestamp: string | null;
+  /** root 레코드의 subtype. `compact_boundary`가 아니면 세션의 진짜 시작점. */
+  readonly rootSubtype: string | null;
+}
+
+/** 부모 uuid를 가리키지만 그 부모가 파일에 없는 노드. */
+export interface OrphanNode {
+  readonly uuid: string;
+  readonly missingParentUuid: string;
+  readonly lineNo: number;
+  readonly type: string;
+}
+
+/**
+ * 인덱싱 결과 — `inspect`, `verify`, `serve`가 공유하는 하나의 계산 결과.
+ *
+ * 각 명령이 자기 순회를 새로 구현하지 않는다. 같은 파일에 대해 두 명령이
+ * 다른 답을 내는 것을 구조적으로 막기 위해서다 (ADR-0004).
+ */
+export interface IndexResult {
+  readonly totalLines: number;
+  readonly recordsWithUuid: number;
+  readonly nodeCount: number;
+  readonly segments: readonly Segment[];
+  readonly orphans: readonly OrphanNode[];
+  readonly unresolvedDuplicates: readonly UnresolvedDuplicate[];
+  /** 올바른 JSON이 아니어서 건너뛴 줄 번호. 비어있지 않으면 리포트에 노출한다. */
+  readonly malformedLines: readonly number[];
+  readonly durationMs: number;
+}
+
+/* ── verify (docs/spec/20260902-0411-verify-command.spec.md) ──────────────── */
+
+export interface VerifyResult {
+  readonly targetUuid: string;
+  readonly segment: Segment;
+  /** `segment.rootSubtype === COMPACT_BOUNDARY`일 때 true — 아직 그 이전과 끊긴 상태. */
+  readonly stillDisconnectedAtRoot: boolean;
+}
+
+/* ── reattach (docs/spec/20260901-2309-reattach-command.spec.md) ──────────── */
+
+export interface ReattachPlan {
+  readonly targetUuid: string;
+  readonly previousParent: string | null;
+  readonly newParent: string;
+  readonly reason: string;
+  /** 재연결 전, targetUuid가 속한 세그먼트의 노드 수 */
+  readonly beforeChainLength: number;
+  /** 재연결 후 예상되는 병합 세그먼트의 노드 수 */
+  readonly afterChainLength: number;
+}
+
+export interface ReattachResult {
+  readonly plan: ReattachPlan;
+  readonly committed: boolean;
+  /** `committed === true`일 때만 존재 */
+  readonly backupPath?: string;
+  readonly surgeryLogPath?: string;
+}
+
+/* ── revert (docs/spec/20260902-0411-revert-command.spec.md) ──────────────── */
+
+/** `{세션}.surgery.log`의 한 줄. append-only. */
+export interface SurgeryLogEntry {
+  readonly timestamp: string;
+  readonly kind: "reattach" | "revert";
+  readonly targetUuid?: string;
+  readonly previousParent?: string | null;
+  readonly newParent?: string;
+  /** kind가 `revert`일 때, 되돌린 대상 항목들의 timestamp */
+  readonly revertedEntries?: readonly string[];
+  readonly reason: string;
+  readonly backupPath: string;
+}
+
+export interface RevertPlan {
+  readonly targetEntries: readonly SurgeryLogEntry[];
+  readonly restoreFromBackup: string;
+  readonly expectedChainLength: number;
+}
+
+export interface RevertResult {
+  readonly plan: RevertPlan;
+  readonly committed: boolean;
+  readonly preRevertBackupPath?: string;
+  readonly surgeryLogPath?: string;
+}
+
+/* ── serve (docs/spec/20260902-0420-serve-command.spec.md) ────────────────── */
+
+export interface SegmentDetail {
+  readonly segment: Segment;
+  /** 이 세그먼트에 속한 노드들 (root → leaf 순서). 본문은 포함하지 않는다. */
+  readonly nodes: readonly NodeIndex[];
+  /** root가 compact_boundary일 때 화면에 표시할 재연결 명령어. 아니면 null. */
+  readonly suggestedReattachCommand: string | null;
+}
+
+export interface NodeBody {
+  readonly uuid: string;
+  /** 원본 JSONL 한 줄 (파싱하지 않은 그대로) */
+  readonly raw: string;
+}

@@ -1,0 +1,22 @@
+{
+  "fixture": "minimal-chain.anon.jsonl",
+  "note": "끊긴 곳이 없는 단일 체인. inspect Spec '세션 전체가 하나의 세그먼트로만 이루어짐' 케이스.",
+  "expected": {
+    "totalLines": 4,
+    "recordsWithUuid": 4,
+    "nodeCount": 4,
+    "segments": [
+      {
+        "rootUuid": "00000000-0000-4000-8000-000000000001",
+        "leafUuid": "00000000-0000-4000-8000-000000000004",
+        "nodeCount": 4,
+        "startTimestamp": "2026-01-01T00:00:01.000Z",
+        "endTimestamp": "2026-01-01T00:00:04.000Z",
+        "rootSubtype": null
+      }
+    ],
+    "orphans": [],
+    "unresolvedDuplicates": [],
+    "malformedLines": []
+  }
+}

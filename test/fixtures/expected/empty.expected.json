@@ -1,0 +1,13 @@
+{
+  "fixture": "empty.anon.jsonl",
+  "note": "0바이트 파일. 불변식 위반이 아니다 — uuid를 가진 레코드가 애초에 없으므로 '부모를 가진 레코드가 하나도 없다'는 조건이 성립하지 않는다. 정상 종료(0).",
+  "expected": {
+    "totalLines": 0,
+    "recordsWithUuid": 0,
+    "nodeCount": 0,
+    "segments": [],
+    "orphans": [],
+    "unresolvedDuplicates": [],
+    "malformedLines": []
+  }
+}

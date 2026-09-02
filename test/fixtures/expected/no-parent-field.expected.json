@@ -1,0 +1,8 @@
+{
+  "fixture": "no-parent-field.anon.jsonl",
+  "note": "parentUuid 키가 어느 줄에도 없다 — 스키마가 바뀌어 필드명이 사라진 상황을 흉내낸다. 이때 '세그먼트 3개, orphans 0'을 반환하면 도구는 자신 있게 틀린 답을 내놓는 것이다 (ADR-0004). 반환값이 아니라 throw로 판정한다.",
+  "expectThrows": {
+    "messageIncludes": "parentUuid",
+    "exitCode": 2
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "fixture": "malformed-line.anon.jsonl",
+  "note": "2행이 잘린 JSON이다. 그 줄만 건너뛰고 처리를 계속하되 malformedLines에 줄 번호를 남긴다 — 조용히 무시하지 않는다. 건너뛴 줄은 recordsWithUuid에 세지 않는다 (파싱 전이라 uuid 유무를 알 수 없다).",
+  "expected": {
+    "totalLines": 3,
+    "recordsWithUuid": 2,
+    "nodeCount": 2,
+    "segments": [
+      {
+        "rootUuid": "00000000-0000-4000-8000-000000000001",
+        "leafUuid": "00000000-0000-4000-8000-000000000002",
+        "nodeCount": 2,
+        "startTimestamp": "2026-01-01T00:00:01.000Z",
+        "endTimestamp": "2026-01-01T00:00:02.000Z",
+        "rootSubtype": null
+      }
+    ],
+    "orphans": [],
+    "unresolvedDuplicates": [],
+    "malformedLines": [2]
+  }
+}
