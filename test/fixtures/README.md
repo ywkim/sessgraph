@@ -19,7 +19,6 @@
 - **`durationMs`** — 실행마다 달라진다. 성능은 골든 값이 아니라 Spec의 "성능 요구사항" 상한으로 검증한다
 - **`byteOffset` / `byteLength`** — 줄마다 손으로 세면 오히려 오답 위험이 크다. 대신 불변식으로 검증한다: 각 노드에 대해 파일의 `[byteOffset, byteOffset + byteLength)` 구간을 잘라 JSON으로 파싱했을 때 그 `uuid`가 노드의 `uuid`와 같아야 한다
 
-## 아직 명세에 없어 픽스처가 대신 드러내는 것
+## 의도적으로 다루지 않는 것
 
-- **`DuplicatePolicy` 기본값** — `inspect` Spec은 "데이터 모델에서 정의하는 기본값"을 따르라고 하는데, 그 기본값이 어디에도 없다. `duplicate-parents.expected.json`은 임의로 하나를 고르는 대신 세 정책의 결과를 모두 못박아 둔다. 기본값이 정해지면 그 정책을 가리키는 항목을 추가한다
-- **`parentUuid: null`과 키 자체의 부재를 구분하는가** — `no-parent-field.anon.jsonl`은 키를 통째로 뺐으므로 두 해석이 같은 답을 낸다. 구분이 필요해지면 픽스처를 하나 더 만든다
+- **`parentUuid: null`과 키 자체의 부재를 구분하는가** — `SessionRecord.parentUuid`가 옵셔널이라 타입상으로도 구분하지 않는다. `no-parent-field.anon.jsonl`은 키를 통째로 뺐으므로 두 해석이 같은 답(throw)을 낸다. 구분이 필요하다는 근거가 생기면 픽스처와 타입을 함께 바꾼다

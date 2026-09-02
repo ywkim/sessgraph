@@ -1,6 +1,7 @@
 {
   "fixture": "duplicate-parents.anon.jsonl",
-  "note": "ADR-0004의 축소판. uuid ...0003이 3행(parent ...0002)과 4행(parent null)에 두 번 출현한다. 스키마는 동일하고 정책만 다른데 세그먼트 수가 갈린다 — last-wins는 체인을 두 조각으로 보면서도 orphans는 0이라 '문제 없음'처럼 보인다. 정책 기본값은 아직 명세에 없으므로 이 픽스처는 세 정책을 모두 못박는다.",
+  "note": "ADR-0004의 축소판. uuid ...0003이 3행(parent ...0002)과 4행(parent null)에 두 번 출현한다. 스키마는 동일하고 정책만 다른데 세그먼트 수가 갈린다 — last-wins는 체인을 두 조각으로 보면서도 orphans는 0이라 '문제 없음'처럼 보인다. --duplicate-policy 미지정 시 실제로 쓰이는 것은 defaultPolicy가 가리키는 prefer-parent이고, 나머지 정책은 --duplicate-policy로 명시했을 때의 회귀 방지용으로 함께 못박는다.",
+  "defaultPolicy": "prefer-parent",
   "byPolicy": {
     "first-wins": {
       "totalLines": 5,

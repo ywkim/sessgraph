@@ -71,6 +71,10 @@ export interface NodeIndex {
  *
  * 따라서 이 값을 구현자가 즉흥적으로 고르지 않는다 — Spec 문서에
  * 명문화된 정책만 사용하고, 정책이 없는 케이스는 보고한다.
+ *
+ * 기본값은 `prefer-parent`다 (`inspect` Spec) — orphan을 과소보고하지 않는
+ * 정책이 가장 안전하다. ADR-0004 실측에서 `last-wins`는 끊긴 노드가 있어도
+ * `orphans: 0`을 보고했다.
  */
 export type DuplicatePolicy = "first-wins" | "last-wins" | "prefer-parent";
 
