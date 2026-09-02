@@ -17,7 +17,7 @@ sessgraph inspect <file> [--json] [--duplicate-policy=<policy>]
 
 - `<file>`: 필수. 세션 JSONL 파일 경로
 - `--json`: 선택. 사람이 읽는 표 대신 기계가 읽는 JSON을 stdout에 출력
-- `--duplicate-policy`: 선택. `first-wins | last-wins | prefer-parent` 중 하나. 미지정 시 기본값은 아래 "데이터 모델"에서 정의하는 `DuplicatePolicy` 기본값을 따른다
+- `--duplicate-policy`: 선택. `first-wins | last-wins | prefer-parent` 중 하나. 미지정 시 기본값은 `prefer-parent`다 — orphan을 과소보고하지 않는 정책이 가장 안전하다 (근거: [ADR-0004](../adr/ADR-0004-schema-drift-defense.md) 실측표, `last-wins`는 끊긴 노드가 있어도 `orphans: 0`을 보고했다)
 
 종료 코드:
 

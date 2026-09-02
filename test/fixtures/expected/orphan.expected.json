@@ -1,0 +1,29 @@
+{
+  "fixture": "orphan.anon.jsonl",
+  "note": "3행의 parentUuid ...0099가 파일에 존재하지 않는다. parentUuid가 null인 root와 달리 orphan은 세그먼트 root로 승격되지 않는다 (inspect Spec 마지막 항목). orphan이 있어도 종료 코드는 0이다 — 발견은 도구 오류가 아니다.",
+  "expected": {
+    "totalLines": 3,
+    "recordsWithUuid": 3,
+    "nodeCount": 3,
+    "segments": [
+      {
+        "rootUuid": "00000000-0000-4000-8000-000000000001",
+        "leafUuid": "00000000-0000-4000-8000-000000000002",
+        "nodeCount": 2,
+        "startTimestamp": "2026-01-01T00:00:01.000Z",
+        "endTimestamp": "2026-01-01T00:00:02.000Z",
+        "rootSubtype": null
+      }
+    ],
+    "orphans": [
+      {
+        "uuid": "00000000-0000-4000-8000-000000000003",
+        "missingParentUuid": "00000000-0000-4000-8000-000000000099",
+        "lineNo": 3,
+        "type": "assistant"
+      }
+    ],
+    "unresolvedDuplicates": [],
+    "malformedLines": []
+  }
+}

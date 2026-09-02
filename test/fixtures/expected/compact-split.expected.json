@@ -1,0 +1,30 @@
+{
+  "fixture": "compact-split.anon.jsonl",
+  "note": "compact_boundary로 체인이 두 조각으로 끊긴 케이스. 3행은 uuid 없는 메타데이터 레코드라 그래프에 참여하지 않는다 (totalLines 6 ≠ recordsWithUuid 5). segments는 startTimestamp 오름차순이다.",
+  "expected": {
+    "totalLines": 6,
+    "recordsWithUuid": 5,
+    "nodeCount": 5,
+    "segments": [
+      {
+        "rootUuid": "00000000-0000-4000-8000-000000000001",
+        "leafUuid": "00000000-0000-4000-8000-000000000002",
+        "nodeCount": 2,
+        "startTimestamp": "2026-01-01T00:00:01.000Z",
+        "endTimestamp": "2026-01-01T00:00:02.000Z",
+        "rootSubtype": null
+      },
+      {
+        "rootUuid": "00000000-0000-4000-8000-000000000003",
+        "leafUuid": "00000000-0000-4000-8000-000000000005",
+        "nodeCount": 3,
+        "startTimestamp": "2026-01-01T00:00:04.000Z",
+        "endTimestamp": "2026-01-01T00:00:06.000Z",
+        "rootSubtype": "compact_boundary"
+      }
+    ],
+    "orphans": [],
+    "unresolvedDuplicates": [],
+    "malformedLines": []
+  }
+}

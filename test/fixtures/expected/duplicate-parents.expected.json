@@ -1,0 +1,73 @@
+{
+  "fixture": "duplicate-parents.anon.jsonl",
+  "note": "ADR-0004의 축소판. uuid ...0003이 3행(parent ...0002)과 4행(parent null)에 두 번 출현한다. 스키마는 동일하고 정책만 다른데 세그먼트 수가 갈린다 — last-wins는 체인을 두 조각으로 보면서도 orphans는 0이라 '문제 없음'처럼 보인다. --duplicate-policy 미지정 시 실제로 쓰이는 것은 defaultPolicy가 가리키는 prefer-parent이고, 나머지 정책은 --duplicate-policy로 명시했을 때의 회귀 방지용으로 함께 못박는다.",
+  "defaultPolicy": "prefer-parent",
+  "byPolicy": {
+    "first-wins": {
+      "totalLines": 5,
+      "recordsWithUuid": 5,
+      "nodeCount": 4,
+      "segments": [
+        {
+          "rootUuid": "00000000-0000-4000-8000-000000000001",
+          "leafUuid": "00000000-0000-4000-8000-000000000004",
+          "nodeCount": 4,
+          "startTimestamp": "2026-01-01T00:00:01.000Z",
+          "endTimestamp": "2026-01-01T00:00:04.000Z",
+          "rootSubtype": null
+        }
+      ],
+      "orphans": [],
+      "malformedLines": []
+    },
+    "prefer-parent": {
+      "totalLines": 5,
+      "recordsWithUuid": 5,
+      "nodeCount": 4,
+      "segments": [
+        {
+          "rootUuid": "00000000-0000-4000-8000-000000000001",
+          "leafUuid": "00000000-0000-4000-8000-000000000004",
+          "nodeCount": 4,
+          "startTimestamp": "2026-01-01T00:00:01.000Z",
+          "endTimestamp": "2026-01-01T00:00:04.000Z",
+          "rootSubtype": null
+        }
+      ],
+      "orphans": [],
+      "malformedLines": []
+    },
+    "last-wins": {
+      "totalLines": 5,
+      "recordsWithUuid": 5,
+      "nodeCount": 4,
+      "segments": [
+        {
+          "rootUuid": "00000000-0000-4000-8000-000000000001",
+          "leafUuid": "00000000-0000-4000-8000-000000000002",
+          "nodeCount": 2,
+          "startTimestamp": "2026-01-01T00:00:01.000Z",
+          "endTimestamp": "2026-01-01T00:00:02.000Z",
+          "rootSubtype": null
+        },
+        {
+          "rootUuid": "00000000-0000-4000-8000-000000000003",
+          "leafUuid": "00000000-0000-4000-8000-000000000004",
+          "nodeCount": 2,
+          "startTimestamp": "2026-01-01T00:00:03.000Z",
+          "endTimestamp": "2026-01-01T00:00:04.000Z",
+          "rootSubtype": null
+        }
+      ],
+      "orphans": [],
+      "malformedLines": []
+    }
+  },
+  "unresolvedDuplicatesAllPolicies": [
+    {
+      "uuid": "00000000-0000-4000-8000-000000000003",
+      "conflictingParents": ["00000000-0000-4000-8000-000000000002", null],
+      "lineNos": [3, 4]
+    }
+  ]
+}
