@@ -112,6 +112,12 @@ Conventional Commits 형식: `<type>(<scope>): <subject>` (72자 이내)
 - `main` 직접 push를 지양하고 PR로 작업한다 — 다만 이 리포는 branch protection이 **설정되어 있지 않다** (가용 여부 미확인). 즉 이 규칙은 기계적 강제가 아니라 **지침으로만 유지**되며, 위반해도 GitHub이 막지 않는다
 - 위 사실을 근거로 "PR이 승인됐으니 안전하다"고 가정하지 않는다. 정확성 판단은 테스트와 실측이 한다
 
+### 스택 PR 병합 절차
+
+1. 부모 PR 병합 시 `--delete-branch`를 쓰지 않는다 — GitHub의 자동 재타겟 대신 하위 PR이 CLOSED된다 ([cli/cli#1168](https://github.com/cli/cli/issues/1168)). 스택 전체 병합 후 브랜치를 일괄 삭제한다
+2. 부모가 squash 병합됐으면 하위 브랜치를 `git rebase --onto main <부모의_옛_tip> <하위_브랜치>`로 옮긴다 (squash는 새 해시로 압축되므로 base 전환만으로는 부모 파일이 diff에 재출현한다)
+3. `gh pr diff <n> --name-only`로 그 PR 고유 파일만 나오는지 확인 후 병합한다
+
 ## 문서 거버넌스
 
 새 기능을 개발할 때는 기획(PRD), 설계(Design/TDD), 명세(Spec), 기술결정(ADR)을 `docs/` 아래 구조화된 문서로 작성한다 — 상세한 원칙과 템플릿은 [docs/README.md](docs/README.md) 참고.
