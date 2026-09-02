@@ -14,7 +14,7 @@
   "scripts": {
     "build": "tsc",
     "type-check": "tsc --noEmit",
-    "test": "node --test",
+    "test": "npm run build && node --test dist/**/*.test.js",
     "lint": "eslint .",
     "format": "prettier --write \"**/*.{ts,js,json,md}\"",
     "format:check": "prettier --check \"**/*.{ts,js,json,md}\"",
