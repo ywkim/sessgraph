@@ -27,6 +27,9 @@ jobs:
       - name: 포맷 검사
         run: npm run format:check
 
+      - name: lint
+        run: npm run lint
+
       - name: 타입 검사
         run: npm run type-check
 
