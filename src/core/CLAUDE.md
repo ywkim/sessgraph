@@ -57,3 +57,5 @@ uuid → { parentUuid, type, subtype, timestamp, lineNo, byteOffset, byteLength 
 - 픽스처는 `test/fixtures/`에 있고, **익명화본만** 쓴다 (루트 CLAUDE.md "픽스처 정책" 참고)
 
 기대 수치를 못박아 스키마·정책 변경이 조용히 통과하지 못하게 한다.
+
+이 함정은 테스트 기대값에만 성립하지 않는다 — Spec 계약·성능 기준선에도 같은 형태로 나타난다. 일반형은 루트 CLAUDE.md "규칙 추가 게이트 › 기준을 결과에 맞춰 고치지 않는다" 참고.
