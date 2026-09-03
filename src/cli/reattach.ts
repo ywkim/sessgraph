@@ -20,11 +20,14 @@ import {
   ReattachValidationError,
 } from "../core/reattach.js";
 import type {
+  CommandWarning,
+  ErrorCode,
   NodeIndex,
   ReattachPlan,
   ReattachResult,
   SurgeryLogEntry,
 } from "../core/types.js";
+import { errorEnvelope, okEnvelope, printEnvelope } from "./envelope.js";
 
 export async function runReattach(argv: readonly string[]): Promise<number> {
   let values: {
@@ -32,6 +35,7 @@ export async function runReattach(argv: readonly string[]): Promise<number> {
     parent?: string;
     reason?: string;
     commit?: boolean;
+    json?: boolean;
   };
   let positionals: string[];
   try {
@@ -43,33 +47,34 @@ export async function runReattach(argv: readonly string[]): Promise<number> {
         parent: { type: "string" },
         reason: { type: "string" },
         commit: { type: "boolean", default: false },
+        json: { type: "boolean", default: false },
       },
     }));
   } catch (err) {
-    console.error(`인자 파싱 실패: ${(err as Error).message}`);
-    return 2;
+    return fail(
+      false,
+      "UNKNOWN_ARGUMENT",
+      `인자 파싱 실패: ${(err as Error).message}`,
+    );
   }
+
+  const json = Boolean(values.json);
 
   const file = positionals[0];
   if (!file) {
-    console.error("세션 파일 경로가 필요합니다");
-    return 2;
+    return fail(json, "MISSING_ARGUMENT", "세션 파일 경로가 필요합니다");
   }
   if (!existsSync(file)) {
-    console.error(`파일을 찾을 수 없습니다: ${file}`);
-    return 2;
+    return fail(json, "FILE_NOT_FOUND", `파일을 찾을 수 없습니다: ${file}`);
   }
   if (!values.uuid) {
-    console.error("--uuid는 필수입니다");
-    return 2;
+    return fail(json, "MISSING_ARGUMENT", "--uuid는 필수입니다");
   }
   if (!values.parent) {
-    console.error("--parent는 필수입니다");
-    return 2;
+    return fail(json, "MISSING_ARGUMENT", "--parent는 필수입니다");
   }
   if (!values.reason || values.reason.trim() === "") {
-    console.error("사유를 입력해야 합니다");
-    return 2;
+    return fail(json, "EMPTY_REASON", "사유를 입력해야 합니다");
   }
 
   let index;
@@ -77,8 +82,7 @@ export async function runReattach(argv: readonly string[]): Promise<number> {
   try {
     ({ index, nodes } = buildIndexDetailed(file));
   } catch (err) {
-    console.error((err as Error).message);
-    return 2;
+    return fail(json, "SCHEMA_DRIFT", (err as Error).message);
   }
 
   let plan: ReattachPlan;
@@ -92,28 +96,36 @@ export async function runReattach(argv: readonly string[]): Promise<number> {
     );
   } catch (err) {
     if (err instanceof ReattachValidationError) {
-      console.error(err.message);
-      return 2;
+      return fail(json, err.code, err.message, nextActionsFor(err.code));
     }
     throw err;
   }
 
   if (plan.previousParent === plan.newParent) {
-    console.log("이미 연결되어 있습니다. 변경 사항 없음");
+    const result: ReattachResult = { plan, committed: false };
+    if (json) {
+      printEnvelope(okEnvelope("reattach", result));
+    } else {
+      console.log("이미 연결되어 있습니다. 변경 사항 없음");
+    }
     return 0;
   }
 
-  console.log(
-    `${plan.targetUuid} (현재 부모: ${plan.previousParent ?? "없음"}) → ${plan.newParent}로 연결`,
-  );
-  console.log(
-    `체인 길이: ${plan.beforeChainLength} → ${plan.afterChainLength}`,
-  );
-
   if (!values.commit) {
-    console.log(
-      "dry-run — 파일을 수정하지 않았습니다. 적용하려면 --commit을 추가하세요",
-    );
+    const result: ReattachResult = { plan, committed: false };
+    if (json) {
+      printEnvelope(okEnvelope("reattach", result));
+    } else {
+      console.log(
+        `${plan.targetUuid} (현재 부모: ${plan.previousParent ?? "없음"}) → ${plan.newParent}로 연결`,
+      );
+      console.log(
+        `체인 길이: ${plan.beforeChainLength} → ${plan.afterChainLength}`,
+      );
+      console.log(
+        "dry-run — 파일을 수정하지 않았습니다. 적용하려면 --commit을 추가하세요",
+      );
+    }
     return 0;
   }
 
@@ -124,17 +136,51 @@ export async function runReattach(argv: readonly string[]): Promise<number> {
   }
 
   try {
-    const result = await applyReattach(file, plan, target);
-    console.log(`백업: ${result.backupPath}`);
-    console.log(`수술 로그: ${result.surgeryLogPath}`);
-    console.log(
-      "체인 길이가 늘었습니다. 실제로 이전 내용을 기억하는지는 세션을 재개해 직접 확인하세요",
-    );
+    const { result, warnings } = await applyReattach(file, plan, target);
+    if (json) {
+      printEnvelope(okEnvelope("reattach", result, warnings));
+    } else {
+      console.log(
+        `${plan.targetUuid} (현재 부모: ${plan.previousParent ?? "없음"}) → ${plan.newParent}로 연결`,
+      );
+      console.log(
+        `체인 길이: ${plan.beforeChainLength} → ${plan.afterChainLength}`,
+      );
+      for (const warning of warnings) {
+        console.warn(warning.message);
+      }
+      console.log(`백업: ${result.backupPath}`);
+      console.log(`수술 로그: ${result.surgeryLogPath}`);
+      console.log(
+        "체인 길이가 늘었습니다. 실제로 이전 내용을 기억하는지는 세션을 재개해 직접 확인하세요",
+      );
+    }
     return 0;
   } catch (err) {
-    console.error((err as Error).message);
-    return 2;
+    return fail(json, "FILE_NOT_WRITABLE", (err as Error).message);
   }
+}
+
+/** `ReattachValidationError`의 코드별로 실행 가능한 다음 행동을 제시한다. */
+function nextActionsFor(code: ErrorCode): readonly string[] {
+  if (code === "AMBIGUOUS_DUPLICATE") {
+    return ["sessgraph inspect --json"];
+  }
+  return [];
+}
+
+function fail(
+  json: boolean,
+  code: ErrorCode,
+  message: string,
+  nextActions: readonly string[] = [],
+): number {
+  if (json) {
+    printEnvelope(errorEnvelope("reattach", code, message, nextActions));
+  } else {
+    console.error(message);
+  }
+  return 2;
 }
 
 /**
@@ -146,7 +192,7 @@ export async function applyReattach(
   filePath: string,
   plan: ReattachPlan,
   target: NodeIndex,
-): Promise<ReattachResult> {
+): Promise<{ result: ReattachResult; warnings: readonly CommandWarning[] }> {
   try {
     accessSync(filePath, fsConstants.W_OK);
   } catch {
@@ -164,7 +210,9 @@ export async function applyReattach(
   // 치환이라 원래 바뀔 수 없지만, compactMetadata/preservedMessages
   // 보존이 ADR-0002의 핵심 전제이므로 회귀가 있으면 침묵하지 않고 경고한다
   // (docs/spec/20260901-2309-reattach-command.spec.md "엣지 케이스").
-  warnIfKeysChanged(originalLine, newLine);
+  // `--json`에서는 stderr에 아무것도 쓰지 않는다 — 경고는 봉투의 `warnings`로
+  // 옮긴다 (docs/spec/20260903-1218-machine-readable-output.spec.md "출력 스트림 규약").
+  const warnings = keysDroppedWarnings(originalLine, newLine);
 
   const backupPath = uniqueBackupPath(filePath);
   copyFileSync(filePath, backupPath, fsConstants.COPYFILE_EXCL);
@@ -185,7 +233,10 @@ export async function applyReattach(
   };
   appendFileSync(surgeryLogPath, `${JSON.stringify(entry)}\n`);
 
-  return { plan, committed: true, backupPath, surgeryLogPath };
+  return {
+    result: { plan, committed: true, backupPath, surgeryLogPath },
+    warnings,
+  };
 }
 
 function readLineAt(
@@ -212,7 +263,10 @@ function replaceParentUuid(line: string, newParent: string): string {
   return line.replace(PARENT_UUID_PATTERN, `"parentUuid":"${newParent}"`);
 }
 
-function warnIfKeysChanged(originalLine: string, newLine: string): void {
+function keysDroppedWarnings(
+  originalLine: string,
+  newLine: string,
+): readonly CommandWarning[] {
   const originalKeys = new Set(
     Object.keys(JSON.parse(originalLine) as Record<string, unknown>).filter(
       (k) => k !== "parentUuid",
@@ -224,11 +278,13 @@ function warnIfKeysChanged(originalLine: string, newLine: string): void {
     ),
   );
   const missing = [...originalKeys].filter((k) => !newKeys.has(k));
-  if (missing.length > 0) {
-    console.warn(
-      `경고: 재작성 후 사라진 필드가 있습니다 (${missing.join(", ")}) — compactMetadata/preservedMessages 보존을 확인하세요 (ADR-0002)`,
-    );
-  }
+  if (missing.length === 0) return [];
+  return [
+    {
+      code: "KEYS_DROPPED",
+      message: `경고: 재작성 후 사라진 필드가 있습니다 (${missing.join(", ")}) — compactMetadata/preservedMessages 보존을 확인하세요 (ADR-0002)`,
+    },
+  ];
 }
 
 async function writeReplacedFile(

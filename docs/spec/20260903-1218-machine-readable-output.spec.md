@@ -168,7 +168,7 @@ interface OptionDescriptor {
 - **필수 인자 누락** → `MISSING_ARGUMENT`, 종료 코드 2. `error.message`에 누락된 인자 이름을 포함한다
 - **경고가 있는 성공** → `ok: true`, `warnings` 채움, 종료 코드 0. 경고를 이유로 실패로 격상하지 않는다 (현재 키 집합 경고의 동작을 유지)
 - **`nextActions`가 실재하지 않는 명령을 가리킴** → 테스트 실패로 막는다. `nextActions`의 각 문자열에서 `sessgraph ` 다음 토큰을 뽑아 레지스트리에 존재하는지 검사하는 테스트를 둔다. 문서로 지키지 않고 기계로 막는다 (Design "아키텍처" 4항)
-- **아직 구현되지 않은 명령** → 레지스트리에 등록하지 않는다. `schema`는 실행 가능한 명령만 광고한다. 따라서 `AMBIGUOUS_DUPLICATE`의 `nextActions`는 `inspect`가 구현되기 전까지 **빈 배열**이다 (Design "향후 확장 고려사항")
+- **아직 구현되지 않은 명령** → 레지스트리에 등록하지 않는다. `schema`는 실행 가능한 명령만 광고한다. `inspect`가 구현된 이후 `AMBIGUOUS_DUPLICATE`의 `nextActions`는 `["sessgraph inspect --json"]`을 채운다 — 레지스트리 자체가 아직 없어 이 값을 자동 검증하는 테스트는 레지스트리 도입 시점에 추가한다 (Design "향후 확장 고려사항"). `verify`/`revert`/`serve`처럼 여전히 구현되지 않은 명령을 가리켜야 하는 실패는 계속 빈 배열이다
 - **JSON 직렬화 실패** → 발생하면 안 되는 상태다. 봉투에 담기는 값은 전부 평문 데이터이며 순환 참조를 갖지 않는다. 만약 던져지면 삼키지 않고 그대로 전파해 종료 코드 2로 끝낸다
 - **stdout 파이프가 닫힘(EPIPE)** → 이 규약의 범위 밖이다. Node 기본 동작을 따른다
 
