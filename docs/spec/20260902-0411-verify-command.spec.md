@@ -4,7 +4,7 @@ status: Current
 related:
   prd: docs/prd/20260902-0411-verify-command.prd.md
   design: docs/design/20260902-0411-verify-command.tdd.md
-updated: 2026-09-02
+updated: 2026-09-03
 ---
 
 # Spec: `verify` 명령
@@ -63,3 +63,4 @@ interface VerifyResult {
 - 여러 기록을 한 번에 비교하는 기능 (PRD Non-Goals)
 - 연결 상태를 자동으로 고치는 기능 (PRD Non-Goals — `reattach`의 역할)
 - `--uuid` 생략 시 파일 전체 요약을 보여주는 기능 (Design "고려한 대안" 대안3 — `inspect`의 역할)
+- 여러 파일에 걸친 연결 상태 확인 — `inspect` Spec Out of Scope와 동일 이유로 단일 파일 대상만 다룬다
