@@ -1,0 +1,32 @@
+{
+  "fixture": "logical-parent.anon.jsonl",
+  "note": "compact_boundary 레코드(3행)가 logicalParentUuid 필드를 갖고 있는 케이스. Segment.rootLogicalParentUuid는 이 값을 그대로 담는다 — 직전 세그먼트의 leafUuid(...0002)와 우연히 같은 값이지만, 이 필드가 채택되는 이유는 '직전 leaf'라서가 아니라 레코드 자신의 logicalParentUuid이기 때문이다 (ADR-0005).",
+  "expected": {
+    "totalLines": 4,
+    "recordsWithUuid": 4,
+    "nodeCount": 4,
+    "segments": [
+      {
+        "rootUuid": "00000000-0000-4000-8000-000000000001",
+        "leafUuid": "00000000-0000-4000-8000-000000000002",
+        "nodeCount": 2,
+        "startTimestamp": "2026-01-01T00:00:01.000Z",
+        "endTimestamp": "2026-01-01T00:00:02.000Z",
+        "rootSubtype": null,
+        "rootLogicalParentUuid": null
+      },
+      {
+        "rootUuid": "00000000-0000-4000-8000-000000000003",
+        "leafUuid": "00000000-0000-4000-8000-000000000004",
+        "nodeCount": 2,
+        "startTimestamp": "2026-01-01T00:00:03.000Z",
+        "endTimestamp": "2026-01-01T00:00:04.000Z",
+        "rootSubtype": "compact_boundary",
+        "rootLogicalParentUuid": "00000000-0000-4000-8000-000000000002"
+      }
+    ],
+    "orphans": [],
+    "unresolvedDuplicates": [],
+    "malformedLines": []
+  }
+}

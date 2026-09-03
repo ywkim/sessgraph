@@ -1,5 +1,6 @@
 import { closeSync, openSync, readSync, statSync } from "node:fs";
 
+import { COMPACT_BOUNDARY } from "./types.js";
 import type {
   DuplicatePolicy,
   IndexResult,
@@ -17,6 +18,7 @@ interface RawOccurrence {
   readonly type: string;
   readonly subtype: string | null;
   readonly timestamp: string | null;
+  readonly logicalParentUuid: string | null;
 }
 
 /**
@@ -62,6 +64,8 @@ class IndexAccumulator {
       type: typeof parsed.type === "string" ? parsed.type : "",
       subtype: typeof parsed.subtype === "string" ? parsed.subtype : null,
       timestamp: typeof parsed.timestamp === "string" ? parsed.timestamp : null,
+      logicalParentUuid:
+        (parsed.logicalParentUuid as string | null | undefined) ?? null,
     };
 
     const existing = this.occurrencesByUuid.get(uuid);
@@ -80,6 +84,9 @@ class IndexAccumulator {
 
     const unresolvedDuplicates: UnresolvedDuplicate[] = [];
     const nodes = new Map<string, NodeIndex>();
+    // NodeIndex는 본문 인접 필드만 노출한다 (src/core/CLAUDE.md). rootLogicalParentUuid
+    // 계산에만 쓰는 값이라 별도 맵으로 둔다.
+    const logicalParentByUuid = new Map<string, string | null>();
 
     for (const [uuid, occurrences] of this.occurrencesByUuid) {
       if (occurrences.length > 1) {
@@ -96,6 +103,7 @@ class IndexAccumulator {
       const chosen = resolveOccurrence(occurrences, policy);
       if (chosen === null) continue; // prefer-parent이 우열을 가릴 수 없어 보고만 함
 
+      logicalParentByUuid.set(uuid, chosen.logicalParentUuid);
       nodes.set(uuid, {
         uuid,
         parentUuid: chosen.parentUuid,
@@ -147,6 +155,10 @@ class IndexAccumulator {
         startTimestamp: root.timestamp,
         endTimestamp: leaf.timestamp,
         rootSubtype: root.subtype,
+        rootLogicalParentUuid:
+          root.subtype === COMPACT_BOUNDARY
+            ? (logicalParentByUuid.get(root.uuid) ?? null)
+            : null,
       };
     });
     segments.sort((a, b) =>
