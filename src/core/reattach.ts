@@ -1,11 +1,26 @@
-import type { IndexResult, NodeIndex, ReattachPlan } from "./types.js";
+import type {
+  ErrorCode,
+  IndexResult,
+  NodeIndex,
+  ReattachPlan,
+} from "./types.js";
 
 /**
  * `reattach` 사전 검증 실패를 나타낸다. 메시지는 Spec의 "엣지 케이스 & 에러
  * 처리" 절 문구를 그대로 쓴다 — CLI는 이 메시지를 그대로 출력하고
  * 종료 코드 2로 끝낸다 (docs/spec/20260901-2309-reattach-command.spec.md).
+ *
+ * `code`는 기계 판독 출력 규약(docs/spec/20260903-1218-machine-readable-output.spec.md)의
+ * `ErrorCode` — 각 검증 실패가 어떤 코드에 대응하는지는 그 문서의 대응표를 따른다.
  */
-export class ReattachValidationError extends Error {}
+export class ReattachValidationError extends Error {
+  constructor(
+    message: string,
+    readonly code: ErrorCode,
+  ) {
+    super(message);
+  }
+}
 
 /**
  * `--uuid`를 `--parent` 아래로 재연결하는 계획을 계산한다. 파일을 쓰지
@@ -27,7 +42,7 @@ export function buildReattachPlan(
   reason: string,
 ): ReattachPlan {
   if (reason.trim() === "") {
-    throw new ReattachValidationError("사유를 입력해야 합니다");
+    throw new ReattachValidationError("사유를 입력해야 합니다", "EMPTY_REASON");
   }
 
   const target = nodes.get(uuid);
@@ -35,27 +50,40 @@ export function buildReattachPlan(
     // 인덱스는 uuid 없는 메타데이터성 레코드(custom-title 등)를 애초에
     // 담지 않는다 — "존재하지 않음"과 "그래프에 참여하지 않는 유형"을
     // 구분할 수 없어 Spec의 두 메시지 중 하나로 합친다.
-    throw new ReattachValidationError("대상 uuid를 찾을 수 없습니다");
+    throw new ReattachValidationError(
+      "대상 uuid를 찾을 수 없습니다",
+      "TARGET_NOT_FOUND",
+    );
   }
   const newParentNode = nodes.get(parent);
   if (!newParentNode) {
-    throw new ReattachValidationError("지정한 부모 uuid를 찾을 수 없습니다");
+    throw new ReattachValidationError(
+      "지정한 부모 uuid를 찾을 수 없습니다",
+      "PARENT_NOT_FOUND",
+    );
   }
 
   if (index.unresolvedDuplicates.some((d) => d.uuid === uuid)) {
     throw new ReattachValidationError(
       "이 레코드는 여러 번 출현하며 어느 것이 최신 상태인지 도구가 판단할 수 없습니다. 먼저 inspect --json으로 확인하세요",
+      "AMBIGUOUS_DUPLICATE",
     );
   }
 
   if (parent === uuid) {
-    throw new ReattachValidationError("순환이 생겨 적용할 수 없습니다");
+    throw new ReattachValidationError(
+      "순환이 생겨 적용할 수 없습니다",
+      "CYCLE_DETECTED",
+    );
   }
   const visited = new Set<string>();
   let cursor: string | null = parent;
   while (cursor !== null) {
     if (cursor === uuid) {
-      throw new ReattachValidationError("순환이 생겨 적용할 수 없습니다");
+      throw new ReattachValidationError(
+        "순환이 생겨 적용할 수 없습니다",
+        "CYCLE_DETECTED",
+      );
     }
     if (visited.has(cursor)) break; // 기존 파일에 이미 순환이 있어도 무한 루프에 빠지지 않는다
     visited.add(cursor);
@@ -136,6 +164,7 @@ function segmentNodeCountContaining(
   if (!segment) {
     throw new ReattachValidationError(
       "이 레코드는 재연결 대상이 될 수 없습니다",
+      "NOT_REATTACHABLE",
     );
   }
   return segment.nodeCount;
