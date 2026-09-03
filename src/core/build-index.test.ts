@@ -41,6 +41,7 @@ function withoutDuration(result: IndexResult): Omit<IndexResult, "durationMs"> {
 const structuralFixtures = [
   "minimal-chain",
   "compact-split",
+  "logical-parent",
   "orphan",
   "malformed-line",
   "empty",

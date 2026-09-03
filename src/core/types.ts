@@ -43,6 +43,11 @@ export interface SessionRecord {
   readonly subtype?: string;
   readonly timestamp?: string;
   readonly sessionId?: string;
+  /**
+   * `compact_boundary` 레코드가 이어야 할 부모를 이미 담고 있는 필드다
+   * (ADR-0005). `parentUuid`와 마찬가지로 없을 수 있으므로 옵셔널이다.
+   */
+  readonly logicalParentUuid?: string | null;
 }
 
 /**
@@ -101,6 +106,12 @@ export interface Segment {
   readonly endTimestamp: string | null;
   /** root 레코드의 subtype. `compact_boundary`가 아니면 세션의 진짜 시작점. */
   readonly rootSubtype: string | null;
+  /**
+   * root가 `compact_boundary`일 때, 그 레코드의 `logicalParentUuid` 값.
+   * rootSubtype이 `compact_boundary`가 아니거나 레코드에 `logicalParentUuid`가
+   * 없으면 `null` (ADR-0005).
+   */
+  readonly rootLogicalParentUuid: string | null;
 }
 
 /** 부모 uuid를 가리키지만 그 부모가 파일에 없는 노드. */

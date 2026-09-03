@@ -4,15 +4,16 @@
 
 전부 손으로 계산한 합성 데이터다. 실제 세션에서 추출한 것이 아니므로 본문·경로·자격증명이 들어 있지 않다 (루트 CLAUDE.md "픽스처 정책").
 
-| 픽스처                         | 무엇을 못박는가                                     |
-| ------------------------------ | --------------------------------------------------- |
-| `minimal-chain.anon.jsonl`     | 끊긴 곳 없는 단일 체인                              |
-| `compact-split.anon.jsonl`     | compact_boundary 분할 + uuid 없는 메타데이터 레코드 |
-| `duplicate-parents.anon.jsonl` | 중복 uuid에서 정책별로 답이 갈리는 것 (ADR-0004)    |
-| `orphan.anon.jsonl`            | 존재하지 않는 부모를 가리키는 노드                  |
-| `malformed-line.anon.jsonl`    | 깨진 줄을 건너뛰되 보고하는 것                      |
-| `no-parent-field.anon.jsonl`   | 스키마 소실 시 0이 아니라 throw                     |
-| `empty.anon.jsonl`             | 0바이트는 불변식 위반이 아님                        |
+| 픽스처                         | 무엇을 못박는가                                           |
+| ------------------------------ | --------------------------------------------------------- |
+| `minimal-chain.anon.jsonl`     | 끊긴 곳 없는 단일 체인                                    |
+| `compact-split.anon.jsonl`     | compact_boundary 분할 + uuid 없는 메타데이터 레코드       |
+| `logical-parent.anon.jsonl`    | compact_boundary의 logicalParentUuid 필드 채택 (ADR-0005) |
+| `duplicate-parents.anon.jsonl` | 중복 uuid에서 정책별로 답이 갈리는 것 (ADR-0004)          |
+| `orphan.anon.jsonl`            | 존재하지 않는 부모를 가리키는 노드                        |
+| `malformed-line.anon.jsonl`    | 깨진 줄을 건너뛰되 보고하는 것                            |
+| `no-parent-field.anon.jsonl`   | 스키마 소실 시 0이 아니라 throw                           |
+| `empty.anon.jsonl`             | 0바이트는 불변식 위반이 아님                              |
 
 ## 기대값에 넣지 않은 것
 
