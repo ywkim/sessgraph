@@ -4,7 +4,7 @@ status: Current
 related:
   prd: docs/prd/20260901-1337-inspect-command.prd.md
   design: docs/design/20260901-1337-inspect-command.tdd.md
-updated: 2026-09-01
+updated: 2026-09-03
 ---
 
 # Spec: `inspect` 명령
@@ -61,6 +61,19 @@ interface IndexResult {
 
 `inspect`는 `IndexResult`를 받아 그대로 리포트로 옮긴다. 판정 로직을 CLI 쪽에서 새로 계산하지 않는다.
 
+## 함수 계약
+
+```ts
+function buildIndexFromFile(
+  filePath: string,
+  policy?: DuplicatePolicy,
+): IndexResult;
+```
+
+- 파일을 **한 줄씩 스트리밍**으로 읽는다. 파일 전체를 하나의 문자열로 메모리에 올려서는 안 된다 (`src/core/CLAUDE.md` "인덱스는 본문을 담지 않는다")
+- 이 계약은 선언적 원칙이 아니라 물리적 제약이다: V8의 문자열 길이 한계(`buffer.constants.MAX_STRING_LENGTH`, 536,870,888자)가 아래 "성능 요구사항"의 기준선 파일(829MB)보다 작다. 파일 전체를 `fs.readFileSync(path, "utf8")`로 읽으면 기준선 파일 자체에서 `ERR_STRING_TOO_LONG`으로 실패한다(2026-09-03 실측)
+- 문자열을 직접 받아 파싱하는 `buildIndex(text: string, policy?: DuplicatePolicy): IndexResult`는 골든 픽스처 테스트 전용으로 유지한다 (`test/fixtures/`는 모두 작은 합성 파일이라 이 한계에 걸리지 않는다). CLI·serve 등 실제 파일을 다루는 모든 호출부는 `buildIndexFromFile`을 쓴다
+
 ## 엣지 케이스 & 에러 처리
 
 - 파일이 없음 → 종료 코드 2, "파일을 찾을 수 없습니다: {경로}"
@@ -78,6 +91,7 @@ interface IndexResult {
 - 인덱스 구축: 2.5초 이내 (TypeScript/Node 실측 2.14초 + 여유)
 - 메모리: 200MB 이내 (본문을 인덱스에 포함하지 않는 설계 — Design 문서 "아키텍처" 참고)
 - 이 기준선보다 10배 큰 파일(약 8GB)에서도 선형에 가깝게 스케일해야 한다. 초선형으로 느려지면(예: O(n²) 부모 탐색) 회귀로 간주한다
+- 8GB 파일은 V8 문자열 한계(약 512MB)를 훨씬 초과한다 — "함수 계약"의 스트리밍 요구사항은 이 스케일 요구사항을 만족하기 위한 전제조건이지 선택적 최적화가 아니다
 
 ## Out of Scope
 
