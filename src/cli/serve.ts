@@ -73,27 +73,74 @@ function currentlyStale(filePath: string, baseline: FileSnapshot): boolean {
   return isStale(current, baseline);
 }
 
+/** 한 시점의 파일에서 뽑아낸 인덱스와, 그 시점의 파일 지문. */
+export type IndexState = {
+  readonly snapshot: FileSnapshot;
+  readonly index: IndexResult;
+  readonly nodes: ReadonlyMap<string, NodeIndex>;
+};
+
+/**
+ * 파일을 인덱싱해 상태 한 벌을 만든다.
+ *
+ * 스냅샷은 반드시 인덱싱 **전에** 찍는다. 인덱싱은 파일을 순차로 읽으므로
+ * 즉시 끝나지 않고(실측 823MB 파일 기준 약 1초), 그 사이에 파일이 바뀌면
+ * 인덱싱 결과는 이미 그 변경을 일부만 반영한 상태다. 스냅샷을 나중에 찍으면
+ * 변경 이후 지문을 baseline으로 삼아 "최신"이라고 오판하고 그 어긋남을
+ * 영구히 놓친다. 먼저 찍으면 다음 요청에서 불일치로 잡혀 다시 인덱싱된다.
+ */
+export function loadIndexState(filePath: string): IndexState {
+  const snapshot = snapshotOf(filePath);
+  const { index, nodes } = buildIndexDetailed(filePath);
+  return { snapshot, index, nodes };
+}
+
+/**
+ * 요청 시점 파일이 `holder`의 baseline과 다르면 다시 인덱싱해 교체한다.
+ *
+ * `buildIndexDetailed`는 동기 함수라 Node의 단일 스레드 이벤트 루프 안에서
+ * 한 요청의 재인덱싱이 끝나기 전까지 다른 요청이 끼어들 수 없다 — 별도의
+ * in-flight 잠금 없이도 중복 재인덱싱이 생기지 않는다.
+ *
+ * 재인덱싱이 실패하면(ADR-0004 불변식 위반 등) `holder`는 갱신하지 않고
+ * 실패를 그대로 알린다. 낡은 인덱스로 조용히 폴백하지 않는다 — "깨진
+ * 인덱스로 화면을 그리지 않는다"는 기동 시 원칙을 실행 중에도 지킨다.
+ * 다음 요청이 오면 다시 재인덱싱을 시도한다(baseline이 그대로라 stale
+ * 판정도 그대로 유지되므로).
+ */
+function refreshIfStale(
+  filePath: string,
+  holder: { current: IndexState },
+): { readonly state: IndexState } | { readonly error: string } {
+  if (!currentlyStale(filePath, holder.current.snapshot)) {
+    return { state: holder.current };
+  }
+  try {
+    holder.current = loadIndexState(filePath);
+    return { state: holder.current };
+  } catch (err) {
+    return { error: (err as Error).message };
+  }
+}
+
 /**
  * 상주 인덱스 위에서 동작하는 읽기 전용 요청 핸들러를 만든다.
  *
- * 인덱스는 프로세스 수명 동안 한 번만 만든다 — 요청마다 다시 인덱싱하면
- * 실측 2.14초를 매번 치르게 된다 (Design "고려한 대안" 대안2).
- * 본문은 상주시키지 않고 `byteOffset`으로 그때 seek해서 읽는다.
- *
- * 기동 후 원본이 외부에서 바뀌면(reattach/revert 등) 상주 인덱스가 낡는다.
- * `/api/body`는 uuid 불일치로 자체 감지하지만, `/api/index`·`/api/segment/*`는
- * 파일을 다시 보지 않아 감지할 지점이 없었다 — 세그먼트 경계가 이미 바뀐
- * 뒤에도 낡은 구조를 200으로 계속 내보내는 채로 실측됐다
- * (docs/design/20260902-0420-serve-command.tdd.md 53번 줄이 이미 이 감지를
- * 약속했지만 이 두 엔드포인트에는 구현되지 않았었다). `snapshot`과 비교해
- * 요청 시점에 어긋났으면 두 엔드포인트도 같은 409로 답한다.
+ * 인덱스는 기본적으로 상주시킨다 — 매 요청 무조건 재인덱싱하면 실측
+ * 대용량 파일 기준 최대 1초대 비용을 매번 치르게 된다(Design "고려한
+ * 대안" 대안2가 요청마다 재인덱싱을 기각한 이유와 같다). 다만 기동 후
+ * 원본이 바뀌면(`reattach`/`revert`의 temp+rename뿐 아니라, 세션이
+ * 진행 중이라 계속 append되는 경우도 포함) 낡은 구조를 계속 200으로
+ * 내보내는 대신, **그 요청에 한해** `refreshIfStale`로 다시 인덱싱해
+ * 최신 상태로 응답한다. 본문은 여전히 상주시키지 않고
+ * `byteOffset`으로 그때 seek해서 읽는다.
  */
 export function createRequestHandler(
   filePath: string,
-  index: IndexResult,
-  nodes: ReadonlyMap<string, NodeIndex>,
-  snapshot: FileSnapshot,
+  initial: IndexState,
 ): (req: IncomingMessage, res: ServerResponse) => void {
+  const holder = { current: initial };
+
   return (req, res) => {
     // ADR-0003: 쓰기 API를 갖지 않는다. 경로 존재 여부와 무관하게 405다 —
     // 어떤 경로가 쓰기를 받는지 탐색당하지 않기 위해서다.
@@ -105,18 +152,24 @@ export function createRequestHandler(
     }
 
     const url = new URL(req.url ?? "/", "http://127.0.0.1");
-
-    if (
+    const isApiRoute =
       url.pathname === "/api/index" ||
-      url.pathname.startsWith("/api/segment/")
-    ) {
-      if (currentlyStale(filePath, snapshot)) {
-        sendJson(res, 409, {
-          error: "파일이 변경되었습니다. 서버를 재시작하세요",
-        });
-        return;
-      }
+      url.pathname.startsWith("/api/segment/") ||
+      url.pathname === "/api/body";
+
+    if (!isApiRoute) {
+      void serveStatic(url.pathname, res);
+      return;
     }
+
+    const refreshed = refreshIfStale(filePath, holder);
+    if ("error" in refreshed) {
+      sendJson(res, 500, {
+        error: `파일이 바뀌어 다시 인덱싱했지만 실패했습니다: ${refreshed.error}`,
+      });
+      return;
+    }
+    const { index, nodes } = refreshed.state;
 
     if (url.pathname === "/api/index") {
       sendJson(res, 200, index);
@@ -138,36 +191,33 @@ export function createRequestHandler(
       return;
     }
 
-    if (url.pathname === "/api/body") {
-      const uuid = url.searchParams.get("uuid");
-      const node = uuid ? nodes.get(uuid) : undefined;
-      if (!uuid || !node) {
-        sendJson(res, 404, { error: `노드를 찾을 수 없습니다: ${uuid ?? ""}` });
-        return;
-      }
-      let raw: string;
-      try {
-        raw = readLineAt(filePath, node.byteOffset, node.byteLength);
-      } catch (err) {
-        sendJson(res, 409, {
-          error: `본문을 읽지 못했습니다: ${(err as Error).message}`,
-        });
-        return;
-      }
-      // 기동 후 원본이 외부에서 바뀌면 offset이 어긋난다. 엉뚱한 본문을
-      // 조용히 렌더하지 않는다 (Spec "엣지 케이스").
-      if (!rawMatchesUuid(raw, uuid)) {
-        sendJson(res, 409, {
-          error: "파일이 변경되었습니다. 서버를 재시작하세요",
-        });
-        return;
-      }
-      const body: NodeBody = { uuid, raw };
-      sendJson(res, 200, body);
+    // url.pathname === "/api/body"
+    const uuid = url.searchParams.get("uuid");
+    const node = uuid ? nodes.get(uuid) : undefined;
+    if (!uuid || !node) {
+      sendJson(res, 404, { error: `노드를 찾을 수 없습니다: ${uuid ?? ""}` });
       return;
     }
-
-    void serveStatic(url.pathname, res);
+    let raw: string;
+    try {
+      raw = readLineAt(filePath, node.byteOffset, node.byteLength);
+    } catch (err) {
+      sendJson(res, 409, {
+        error: `본문을 읽지 못했습니다: ${(err as Error).message}`,
+      });
+      return;
+    }
+    // 위 refreshIfStale이 대부분의 어긋남을 이미 재인덱싱으로 해소하지만,
+    // 요청 처리 도중(재인덱싱 이후 seek 이전) 파일이 또 바뀌는 좁은 창은
+    // 여전히 남는다. uuid 불일치는 그 마지막 방어선이다 (Spec "엣지 케이스").
+    if (!rawMatchesUuid(raw, uuid)) {
+      sendJson(res, 409, {
+        error: "파일이 변경되었습니다. 잠시 후 다시 시도하세요",
+      });
+      return;
+    }
+    const body: NodeBody = { uuid, raw };
+    sendJson(res, 200, body);
   };
 }
 
@@ -264,27 +314,16 @@ export function runServe(
     }
   }
 
-  // 스냅샷은 인덱싱 시작 전에 찍는다. 인덱싱 자체가 파일을 순차로 읽는 데
-  // 시간이 걸리므로(실측 대용량 파일 기준 최대 1초대), 인덱싱 도중 파일이
-  // 바뀌면 스냅샷을 인덱싱 뒤에 찍을 경우 그 변경 이후 상태를 baseline으로
-  // 잘못 기록해 이후 isStale()이 영원히 "안 바뀜"으로 오판한다(2026-09-03
-  // 리뷰에서 지적). 먼저 찍으면 그 구간의 변경도 baseline과의 불일치로
-  // 정확히 잡힌다.
-  const snapshot = snapshotOf(file);
-
-  let index: IndexResult;
-  let nodes: ReadonlyMap<string, NodeIndex>;
+  let initial: IndexState;
   try {
-    ({ index, nodes } = buildIndexDetailed(file));
+    initial = loadIndexState(file);
   } catch (err) {
     // 깨진 인덱스로 화면을 그리지 않는다 (ADR-0004).
     logError((err as Error).message);
     return Promise.resolve(2);
   }
 
-  const server = createServer(
-    createRequestHandler(file, index, nodes, snapshot),
-  );
+  const server = createServer(createRequestHandler(file, initial));
 
   return new Promise<number>((resolve) => {
     server.on("error", (err: NodeJS.ErrnoException) => {
@@ -304,7 +343,7 @@ export function runServe(
         typeof actual === "object" && actual ? actual.port : port;
       log(`http://127.0.0.1:${boundPort}`);
       log(
-        `조각 ${index.segments.length}개 · 노드 ${index.nodeCount}개 · Ctrl-C로 종료`,
+        `조각 ${initial.index.segments.length}개 · 노드 ${initial.index.nodeCount}개 · Ctrl-C로 종료`,
       );
     });
 
