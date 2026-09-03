@@ -4,7 +4,7 @@
  * 따로 두지 않는다
  * (docs/spec/20260903-1218-machine-readable-output.spec.md "데이터 모델").
  *
- * 아직 구현되지 않은 명령(verify, revert, serve)은 등록하지 않는다.
+ * 아직 구현되지 않은 명령(revert, serve)은 등록하지 않는다.
  * `schema`는 실행 가능한 명령만 광고한다 (같은 Spec "엣지 케이스").
  */
 import type {
@@ -86,6 +86,31 @@ export const COMMANDS: readonly CommandDescriptor[] = [
     ],
     example:
       "sessgraph reattach session.jsonl --uuid <uuid> --parent <uuid> --reason '설명' --commit",
+  },
+  {
+    name: "verify",
+    summary: "지정한 지점이 root까지 몇 개 노드로 연결되어 있는지 보고한다",
+    writes: false,
+    positionals: [
+      { name: "file", required: true, description: "세션 JSONL 파일 경로" },
+    ],
+    options: [
+      {
+        name: "uuid",
+        type: "string",
+        required: true,
+        default: null,
+        description: "연결 상태를 확인할 대상 레코드의 uuid",
+      },
+      {
+        name: "json",
+        type: "boolean",
+        required: false,
+        default: false,
+        description: "봉투 JSON 한 줄을 stdout에 출력",
+      },
+    ],
+    example: "sessgraph verify session.jsonl --uuid <uuid> --json",
   },
   {
     name: "schema",

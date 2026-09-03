@@ -1,3 +1,4 @@
+import { findSegmentForUuid } from "./segment.js";
 import type {
   ErrorCode,
   IndexResult,
@@ -145,27 +146,23 @@ function countSubtree(
   return count;
 }
 
-/** uuid가 속한 세그먼트(루트까지 거슬러 올라가 찾은 세그먼트)의 nodeCount. */
+/**
+ * uuid가 속한 세그먼트의 nodeCount. `verify` Spec이 정의한 공유 조회
+ * 함수(`findSegmentForUuid`)를 그대로 쓴다 — 체인 길이 계산을 이 파일에
+ * 따로 구현하지 않는다 (docs/design/20260902-0411-verify-command.tdd.md
+ * "향후 확장 고려사항").
+ */
 function segmentNodeCountContaining(
   index: IndexResult,
   nodes: ReadonlyMap<string, NodeIndex>,
   uuid: string,
 ): number {
-  let cursor = uuid;
-  const visited = new Set<string>();
-  for (;;) {
-    const node = nodes.get(cursor);
-    if (!node || node.parentUuid === null) break;
-    if (visited.has(cursor)) break;
-    visited.add(cursor);
-    cursor = node.parentUuid;
-  }
-  const segment = index.segments.find((s) => s.rootUuid === cursor);
-  if (!segment) {
+  try {
+    return findSegmentForUuid(index, nodes, uuid).nodeCount;
+  } catch {
     throw new ReattachValidationError(
       "이 레코드는 재연결 대상이 될 수 없습니다",
       "NOT_REATTACHABLE",
     );
   }
-  return segment.nodeCount;
 }

@@ -3,6 +3,7 @@ import { errorEnvelope, printEnvelope } from "./envelope.js";
 import { runInspect } from "./inspect.js";
 import { runReattach } from "./reattach.js";
 import { runSchema } from "./schema.js";
+import { runVerify } from "./verify.js";
 
 const [, , command, ...rest] = process.argv;
 
@@ -14,6 +15,10 @@ switch (command) {
   case "reattach": {
     const exitCode = await runReattach(rest);
     process.exit(exitCode);
+    break;
+  }
+  case "verify": {
+    process.exit(runVerify(rest));
     break;
   }
   case "schema": {
@@ -45,7 +50,7 @@ function failUnknownCommand(
     );
   } else {
     console.error(`알 수 없는 명령: ${command ?? "(없음)"}`);
-    console.error("사용 가능한 명령: inspect, reattach, schema");
+    console.error("사용 가능한 명령: inspect, reattach, verify, schema");
   }
   return 2;
 }
