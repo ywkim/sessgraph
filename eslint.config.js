@@ -9,7 +9,10 @@ export default tseslint.config(
   {
     languageOptions: {
       parserOptions: {
-        projectService: true,
+        // projectService(자동 탐색)는 tsconfig.json의 include(`src/**/*.ts`,
+        // `src/web` 제외)만 보므로 tsconfig.web.json 쪽 파일(app.ts)을 못
+        // 찾는다. 두 프로젝트를 명시적으로 나열한다.
+        project: ["./tsconfig.json", "./tsconfig.web.json"],
         tsconfigRootDir: import.meta.dirname,
       },
     },
@@ -18,16 +21,6 @@ export default tseslint.config(
         "error",
         { varsIgnorePattern: "^_", argsIgnorePattern: "^_" },
       ],
-    },
-  },
-  {
-    // src/web은 브라우저에서 그대로 실행되는 자산이라 tsc 프로젝트
-    // (tsconfig의 include는 src/**/*.ts)에 속하지 않는다. 타입 정보를
-    // 요구하는 규칙은 끄고 문법·기본 규칙만 적용한다.
-    files: ["src/web/**/*.js"],
-    extends: [tseslint.configs.disableTypeChecked],
-    languageOptions: {
-      parserOptions: { projectService: false, project: false },
     },
   },
   {
