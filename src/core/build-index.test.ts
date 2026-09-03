@@ -1,10 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync, unlinkSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 
-import { buildIndex } from "./build-index.js";
+import { buildIndex, buildIndexFromFile } from "./build-index.js";
 import type { IndexResult } from "./types.js";
 
 const fixturesDir = path.join(
@@ -15,8 +15,12 @@ const fixturesDir = path.join(
   "fixtures",
 );
 
+function fixturePath(name: string): string {
+  return path.join(fixturesDir, `${name}.anon.jsonl`);
+}
+
 function readFixture(name: string): string {
-  return readFileSync(path.join(fixturesDir, `${name}.anon.jsonl`), "utf8");
+  return readFileSync(fixturePath(name), "utf8");
 }
 
 function readExpected(name: string): Record<string, unknown> {
@@ -119,6 +123,34 @@ test("buildIndex: byteOffset/byteLength는 원본 파일에서 그 uuid 자신�
         `${name}: ${uuid}의 byteOffset이 파일 내 자신을 가리키지 않는다`,
       );
     }
+  }
+});
+
+for (const name of structuralFixtures) {
+  test(`buildIndexFromFile: ${name} — buildIndex(text)와 같은 결과`, () => {
+    const fromText = withoutDuration(buildIndex(readFixture(name)));
+    const fromFile = withoutDuration(buildIndexFromFile(fixturePath(name)));
+    assert.deepEqual(fromFile, fromText);
+  });
+}
+
+test("buildIndexFromFile: 1MB 청크 경계에 걸친 줄도 안 끊고 하나로 읽는다", () => {
+  // duplicate-parents 픽스처를 반복 결합해 최소 하나의 줄 경계가
+  // CHUNK_SIZE(1MB) 배수 근처에 오도록 만든다. 청크가 줄 중간에서 끊겨도
+  // 다음 청크와 이어붙여 온전한 한 줄로 파싱되는지 확인한다
+  // (buildIndexFromFile "청크 경계" 처리).
+  const base = readFixture("duplicate-parents").trimEnd();
+  const repeated = Array(400).fill(base).join("\n"); // 약 1.x MB
+  const tmpPath = path.join(fixturesDir, ".tmp-chunk-boundary.jsonl");
+  writeFileSync(tmpPath, repeated);
+  try {
+    const fromText = buildIndex(repeated, "first-wins");
+    const fromFile = buildIndexFromFile(tmpPath, "first-wins");
+    assert.equal(fromFile.totalLines, fromText.totalLines);
+    assert.equal(fromFile.nodeCount, fromText.nodeCount);
+    assert.equal(fromFile.malformedLines.length, 0);
+  } finally {
+    unlinkSync(tmpPath);
   }
 });
 
