@@ -21,6 +21,16 @@ export default tseslint.config(
     },
   },
   {
+    // src/web은 브라우저에서 그대로 실행되는 자산이라 tsc 프로젝트
+    // (tsconfig의 include는 src/**/*.ts)에 속하지 않는다. 타입 정보를
+    // 요구하는 규칙은 끄고 문법·기본 규칙만 적용한다.
+    files: ["src/web/**/*.js"],
+    extends: [tseslint.configs.disableTypeChecked],
+    languageOptions: {
+      parserOptions: { projectService: false, project: false },
+    },
+  },
+  {
     // node:test의 최상위 test()는 관용적으로 await하지 않는다 (러너가 프로세스 종료 전 대기)
     files: ["**/*.test.ts"],
     rules: {

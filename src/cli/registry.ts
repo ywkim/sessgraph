@@ -4,8 +4,8 @@
  * 따로 두지 않는다
  * (docs/spec/20260903-1218-machine-readable-output.spec.md "데이터 모델").
  *
- * 아직 구현되지 않은 명령(serve)은 등록하지 않는다.
- * `schema`는 실행 가능한 명령만 광고한다 (같은 Spec "엣지 케이스").
+ * `schema`는 실행 가능한 명령만 광고한다 — 아직 구현되지 않은 명령은
+ * 등록하지 않는다 (같은 Spec "엣지 케이스").
  */
 import type {
   CommandDescriptor,
@@ -152,6 +152,25 @@ export const COMMANDS: readonly CommandDescriptor[] = [
       },
     ],
     example: "sessgraph revert session.jsonl --last --commit",
+  },
+  {
+    name: "serve",
+    summary: "127.0.0.1에 읽기 전용 뷰어 서버를 띄워 조각 타임라인을 본다",
+    writes: false,
+    positionals: [
+      { name: "file", required: true, description: "세션 JSONL 파일 경로" },
+    ],
+    options: [
+      {
+        name: "port",
+        type: "string",
+        required: false,
+        default: "7377",
+        description:
+          "바인딩할 포트. 사용 중이면 다른 포트를 자동 선택하지 않고 오류로 종료한다",
+      },
+    ],
+    example: "sessgraph serve session.jsonl --port 7377",
   },
   {
     name: "schema",

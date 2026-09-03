@@ -24,11 +24,12 @@ test("registry: 등록된 명령마다 name·summary·example이 비어있지 �
   }
 });
 
-test("registry: isRegisteredCommand는 미구현 명령(serve)을 거짓으로 판정한다", () => {
-  assert.equal(isRegisteredCommand("serve"), false);
+test("registry: isRegisteredCommand는 등록되지 않은 이름을 거짓으로 판정한다", () => {
+  assert.equal(isRegisteredCommand("graph"), false);
 });
 
-test("registry: isRegisteredCommand는 verify/revert를 참으로 판정한다", () => {
+test("registry: isRegisteredCommand는 verify/revert/serve를 참으로 판정한다", () => {
   assert.equal(isRegisteredCommand("verify"), true);
   assert.equal(isRegisteredCommand("revert"), true);
+  assert.equal(isRegisteredCommand("serve"), true);
 });

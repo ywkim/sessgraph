@@ -2,7 +2,7 @@
 
 Claude Code 세션 JSONL의 구조를 색인해 **어디가 끊겼는지 진단하고, 끊긴 체인을 이어붙이는** 도구.
 
-> ⚠️ 초기 스캐폴딩 단계입니다. 아직 구현이 없습니다.
+> ⚠️ 아래 명령이 모두 동작하지만, 아직 실사용 검증이 얕습니다. 세션 파일을 수정하기 전에 반드시 백업을 확인하세요.
 
 ## 문제
 
@@ -33,18 +33,18 @@ sessgraph는 `parentUuid` 그래프와 컴팩트 경계를 **함께** 모델링�
 - 수술은 레코드 삭제 없이 `parentUuid` 재연결만 ([ADR-0002](docs/adr/ADR-0002-record-preserving-reattach.md))
 - 인덱서·CLI·웹이 단일 언어, 단일 파싱 구현 ([ADR-0001](docs/adr/ADR-0001-typescript-single-language.md))
 
-## 예정 명령
+## 명령
 
 ```
 sessgraph inspect <file>     # 조각·root·orphan 리포트
-sessgraph serve <file>       # 읽기 전용 웹 뷰어
+sessgraph serve <file>       # 읽기 전용 웹 뷰어 (127.0.0.1:7377)
 sessgraph reattach <file> --uuid X --parent Y --reason "..."
 sessgraph verify <file>      # leaf → root 역추적 길이
 sessgraph revert <file>      # 백업 복원
 sessgraph schema             # 명령·플래그·오류 코드를 기계 판독 형태로 출력
 ```
 
-`schema`를 뺀 모든 명령은 `--json`으로 기계 판독 출력을 낼 수 있습니다 ([규약](docs/spec/20260903-1218-machine-readable-output.spec.md)). `schema`는 항상 기계 판독입니다.
+`inspect`·`reattach`·`verify`·`revert`는 `--json`으로 기계 판독 출력을 낼 수 있습니다 ([규약](docs/spec/20260903-1218-machine-readable-output.spec.md)). `schema`는 항상 기계 판독이고, `serve`는 포그라운드 서버라 봉투를 내지 않습니다 — 기계 판독 결과는 서버의 `/api/*` 엔드포인트가 냅니다.
 
 ## ⚠️ 주의
 
