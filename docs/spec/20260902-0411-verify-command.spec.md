@@ -17,7 +17,7 @@ sessgraph verify <file> --uuid <uuid> [--json]
 
 - `<file>`: 필수. 세션 JSONL 파일 경로
 - `--uuid`: 필수. 연결 상태를 확인할 대상 레코드의 uuid (세그먼트 내 어떤 노드를 지정해도 같은 세그먼트로 귀결)
-- `--json`: 선택. 사람이 읽는 문장 대신 기계가 읽는 JSON을 stdout에 출력
+- `--json`: 선택. 사람이 읽는 문장 대신 기계가 읽는 JSON을 stdout에 출력. 봉투 형태와 오류 코드는 [기계 판독 출력 규약 Spec](20260903-1218-machine-readable-output.spec.md)이 정의한다 (`result`에 `VerifyResult`가 그대로 들어간다)
 
 종료 코드:
 

@@ -12,7 +12,7 @@ updated: 2026-09-03
 ## Interface
 
 ```
-sessgraph reattach <file> --uuid <uuid> --parent <uuid> --reason <text> [--commit]
+sessgraph reattach <file> --uuid <uuid> --parent <uuid> --reason <text> [--commit] [--json]
 ```
 
 - `<file>`: 필수. 세션 JSONL 파일 경로
@@ -20,6 +20,7 @@ sessgraph reattach <file> --uuid <uuid> --parent <uuid> --reason <text> [--commi
 - `--parent`: 필수. 새로 지정할 부모 레코드의 uuid
 - `--reason`: 필수. 이 재연결을 하는 이유 (자유 텍스트, 수술 로그에 그대로 기록)
 - `--commit`: 선택. 없으면 dry-run — 계획만 출력하고 파일은 건드리지 않는다
+- `--json`: 선택. 출력 형태는 [기계 판독 출력 규약 Spec](20260903-1218-machine-readable-output.spec.md)이 정의한다. 쓰기 여부에는 영향을 주지 않는다 (쓰기는 `--commit`만이 결정한다)
 
 종료 코드:
 
