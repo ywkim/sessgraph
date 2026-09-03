@@ -2,7 +2,13 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import type { Server } from "node:http";
-import { copyFileSync, mkdtempSync, writeFileSync } from "node:fs";
+import {
+  copyFileSync,
+  mkdtempSync,
+  readFileSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -36,7 +42,11 @@ async function withServer(
   copyFileSync(path.join(fixturesDir, `${fixture}.anon.jsonl`), file);
 
   const { index, nodes } = buildIndexDetailed(file);
-  const server: Server = createServer(createRequestHandler(file, index, nodes));
+  const stat = statSync(file);
+  const snapshot = { ino: stat.ino, size: stat.size, mtimeMs: stat.mtimeMs };
+  const server: Server = createServer(
+    createRequestHandler(file, index, nodes, snapshot),
+  );
   await new Promise<void>((resolve) =>
     server.listen(0, "127.0.0.1", () => resolve()),
   );
@@ -109,6 +119,23 @@ test("serve: 기동 후 원본이 바뀌면 /api/body는 409로 알린다", asyn
     assert.equal(res.status, 409);
     const payload = (await res.json()) as { error: string };
     assert.match(payload.error, /파일이 변경되었습니다|본문을 읽지 못했습니다/);
+  });
+});
+
+test("serve: 기동 후 원본이 바뀌면 /api/index는 낡은 구조를 200으로 내보내지 않는다", async () => {
+  await withServer("compact-split", async (base, file) => {
+    // uuid→uuid 치환(길이 불변)도 잡혀야 한다 — size만 보면 놓친다.
+    writeFileSync(file, readFileSync(file, "utf8").replace(U(1), U(2)));
+    const res = await fetch(`${base}/api/index`);
+    assert.equal(res.status, 409);
+  });
+});
+
+test("serve: 기동 후 원본이 바뀌면 /api/segment/:root도 409", async () => {
+  await withServer("compact-split", async (base, file) => {
+    writeFileSync(file, readFileSync(file, "utf8").replace(U(1), U(2)));
+    const res = await fetch(`${base}/api/segment/${U(3)}`);
+    assert.equal(res.status, 409);
   });
 });
 

@@ -1,4 +1,4 @@
-import { closeSync, existsSync, openSync, readSync } from "node:fs";
+import { closeSync, existsSync, openSync, readSync, statSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import type { IncomingMessage, ServerResponse } from "node:http";
@@ -26,17 +26,56 @@ const MIME: Record<string, string> = {
   ".css": "text/css; charset=utf-8",
 };
 
+/** 기동 시점 파일 상태 지문. 상주 인덱스가 그 지문 기준으로 여전히 유효한지 판단하는 데 쓴다. */
+export type FileSnapshot = {
+  readonly ino: number;
+  readonly size: number;
+  readonly mtimeMs: number;
+};
+
+/**
+ * 상주 인덱스가 지금 파일 상태와 여전히 맞는지 검사한다.
+ *
+ * `size`나 `mtime`(초 단위) 단독으로는 놓치는 변경이 실측으로 확인됐다 —
+ * 같은 길이 문자열로 치환하는 `reattach`(uuid→uuid)는 size가 그대로고,
+ * `reattach`/`revert`는 temp+rename이라 매번 새 inode를 받지만 제3의
+ * 도구가 in-place로 고치면 ino는 유지된 채 mtime만 바뀔 수 있다.
+ * `{ino, size, mtimeMs}` 세 값을 모두 비교해야 두 경로 다 잡힌다.
+ */
+function isStale(filePath: string, baseline: FileSnapshot): boolean {
+  let current: ReturnType<typeof statSync>;
+  try {
+    current = statSync(filePath);
+  } catch {
+    return true; // 파일이 사라졌다면 당연히 stale이다
+  }
+  return (
+    current.ino !== baseline.ino ||
+    current.size !== baseline.size ||
+    current.mtimeMs !== baseline.mtimeMs
+  );
+}
+
 /**
  * 상주 인덱스 위에서 동작하는 읽기 전용 요청 핸들러를 만든다.
  *
  * 인덱스는 프로세스 수명 동안 한 번만 만든다 — 요청마다 다시 인덱싱하면
  * 실측 2.14초를 매번 치르게 된다 (Design "고려한 대안" 대안2).
  * 본문은 상주시키지 않고 `byteOffset`으로 그때 seek해서 읽는다.
+ *
+ * 기동 후 원본이 외부에서 바뀌면(reattach/revert 등) 상주 인덱스가 낡는다.
+ * `/api/body`는 uuid 불일치로 자체 감지하지만, `/api/index`·`/api/segment/*`는
+ * 파일을 다시 보지 않아 감지할 지점이 없었다 — 세그먼트 경계가 이미 바뀐
+ * 뒤에도 낡은 구조를 200으로 계속 내보내는 채로 실측됐다
+ * (docs/design/20260902-0420-serve-command.tdd.md 53번 줄이 이미 이 감지를
+ * 약속했지만 이 두 엔드포인트에는 구현되지 않았었다). `snapshot`과 비교해
+ * 요청 시점에 어긋났으면 두 엔드포인트도 같은 409로 답한다.
  */
 export function createRequestHandler(
   filePath: string,
   index: IndexResult,
   nodes: ReadonlyMap<string, NodeIndex>,
+  snapshot: FileSnapshot,
 ): (req: IncomingMessage, res: ServerResponse) => void {
   return (req, res) => {
     // ADR-0003: 쓰기 API를 갖지 않는다. 경로 존재 여부와 무관하게 405다 —
@@ -49,6 +88,18 @@ export function createRequestHandler(
     }
 
     const url = new URL(req.url ?? "/", "http://127.0.0.1");
+
+    if (
+      url.pathname === "/api/index" ||
+      url.pathname.startsWith("/api/segment/")
+    ) {
+      if (isStale(filePath, snapshot)) {
+        sendJson(res, 409, {
+          error: "파일이 변경되었습니다. 서버를 재시작하세요",
+        });
+        return;
+      }
+    }
 
     if (url.pathname === "/api/index") {
       sendJson(res, 200, index);
@@ -205,8 +256,16 @@ export function runServe(
     logError((err as Error).message);
     return Promise.resolve(2);
   }
+  const stat = statSync(file);
+  const snapshot: FileSnapshot = {
+    ino: stat.ino,
+    size: stat.size,
+    mtimeMs: stat.mtimeMs,
+  };
 
-  const server = createServer(createRequestHandler(file, index, nodes));
+  const server = createServer(
+    createRequestHandler(file, index, nodes, snapshot),
+  );
 
   return new Promise<number>((resolve) => {
     server.on("error", (err: NodeJS.ErrnoException) => {
