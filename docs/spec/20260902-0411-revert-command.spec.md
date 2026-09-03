@@ -4,7 +4,7 @@ status: Current
 related:
   prd: docs/prd/20260902-0411-revert-command.prd.md
   design: docs/design/20260902-0411-revert-command.tdd.md
-updated: 2026-09-02
+updated: 2026-09-03
 ---
 
 # Spec: `revert` 명령
@@ -91,3 +91,4 @@ interface RevertResult {
 - 기록을 만든 적 없는 임의 지점으로 되돌리기 — 실제로 보관된 백업으로만 복원 가능 (PRD Non-Goals)
 - 되돌리기를 다시 되돌리는 재귀적 처리 (`--to`가 이미 되돌려진 구간을 가리킬 때는 대상에서 제외할 뿐, 그 자체를 자동으로 재구성하지 않는다)
 - 오래된 백업 파일 자동 정리 (Design "향후 확장 고려사항")
+- 여러 파일에 걸친 되돌리기 — `inspect` Spec Out of Scope와 동일 이유로 단일 파일 대상만 다룬다

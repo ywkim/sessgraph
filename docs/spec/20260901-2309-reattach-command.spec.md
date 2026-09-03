@@ -4,7 +4,7 @@ status: Current
 related:
   prd: docs/prd/20260901-2309-reattach-command.prd.md
   design: docs/design/20260901-2309-reattach-command.tdd.md
-updated: 2026-09-01
+updated: 2026-09-03
 ---
 
 # Spec: `reattach` 명령
@@ -67,6 +67,7 @@ interface ReattachResult {
 - `--commit`으로 실행했으나 대상 경로에 쓰기 권한이 없음 → 종료 코드 2. 백업 생성 전 단계에서 권한을 먼저 확인해, 백업만 만들고 본 파일 교체에 실패하는 중간 상태를 피한다
 - 같은 파일에 대해 백업이 이미 존재하는 타임스탬프로 재시도 (같은 분 안에 두 번 실행) → 파일명에 초 단위까지 포함하거나, 충돌 시 일련번호를 붙여 기존 백업을 덮어쓰지 않는다 (`src/cli/CLAUDE.md` "쓰기 규칙" 3번)
 - 정책으로 해소되지 않은 중복(`unresolvedDuplicates`)에 `--uuid`가 포함됨 → 종료 코드 2, "이 레코드는 여러 번 출현하며 어느 것이 최신 상태인지 도구가 판단할 수 없습니다. 먼저 `inspect --json`으로 확인하세요" (ADR-0004: 애매한 상태에서 추측하지 않는다)
+- `--commit` 적용 후, 수정한 줄의 원본 키 집합과 재작성 후 키 집합을 비교한다(`parentUuid` 제외). 키가 하나라도 사라졌으면 경고를 출력한다 — `compactMetadata`·`preservedMessages`는 ADR-0002가 보존을 전제하는 필드이고, 그 결정 자체가 "왜 작동하는지는 모르지만 관측된 성공률이 높다"는 불확실성 위에 있으므로(ADR-0002 "Rationale") 최소한 구조적 보존 여부는 확인한다. 경고는 커밋을 막지 않는다 — 회상 성공 여부의 자동 판정은 여전히 Out of Scope(ADR-0002)
 
 ## 성능 요구사항
 
@@ -79,3 +80,4 @@ interface ReattachResult {
 - 재연결 후 실질 회상 여부의 자동 검증 (PRD Non-Goals, ADR-0002)
 - 백업으로부터 되돌리는 기능 (`revert` 명령 — 별도 Spec)
 - 재연결 결과를 웹에서 확인하는 기능 (`serve`가 읽기 시 반영하지만, 그건 `serve` 자체 Spec의 범위)
+- 여러 파일에 걸친 재연결 (예: fork 병합 후 재연결) — `inspect` Spec Out of Scope와 동일 이유로 단일 파일 대상만 다룬다

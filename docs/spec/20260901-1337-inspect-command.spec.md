@@ -29,6 +29,8 @@ sessgraph inspect <file> [--json] [--duplicate-policy=<policy>]
 
 핵심 타입은 `src/core/types.ts`에 정의된 것을 그대로 쓴다: `SessionRecord`, `NodeIndex`, `DuplicatePolicy`, `UnresolvedDuplicate`. 이 문서는 재기술하지 않고 아래 신규 타입만 추가로 정의한다 (구현 시 `src/core/types.ts`에 추가):
 
+`SessionRecord`에 `readonly logicalParentUuid?: string | null`을 추가한다 — `compact_boundary` 레코드가 이어야 할 부모를 이미 담고 있는 필드다(ADR-0005). `parentUuid`와 마찬가지로 없을 수 있는 필드이므로 옵셔널로 정의한다.
+
 ```ts
 interface Segment {
   readonly rootUuid: string;
@@ -38,6 +40,12 @@ interface Segment {
   readonly endTimestamp: string | null;
   /** root 레코드의 subtype. compact_boundary가 아니면 세션의 진짜 시작점. */
   readonly rootSubtype: string | null;
+  /**
+   * root가 compact_boundary일 때, 그 레코드의 `logicalParentUuid` 값을 그대로 담는다.
+   * 이어야 할 부모가 기록에 이미 있다는 뜻이다. rootSubtype이 compact_boundary가
+   * 아니거나, 레코드에 logicalParentUuid가 없으면 null (ADR-0005).
+   */
+  readonly rootLogicalParentUuid: string | null;
 }
 
 interface OrphanNode {
@@ -83,6 +91,7 @@ function buildIndexFromFile(
 - 같은 uuid가 여러 번 출현하고 그중 일부만 `parentUuid`가 다름 → `--duplicate-policy`로 지정한 정책에 따라 하나를 채택하되, 채택되지 않은 나머지는 `unresolvedDuplicates`에 포함해 리포트에 노출한다. 정책이 하나를 명확히 고를 수 없는 경우(예: 서로 다른 두 개의 유효한 `parentUuid`가 동시에 나타나고 어느 쪽도 "부모 있음/없음"으로 우열이 없는 경우)는 임의로 고르지 않고 `unresolvedDuplicates`로만 보고한다
 - 세션 전체가 하나의 세그먼트로만 이루어짐(끊긴 지점 없음) → 정상 종료, `segments.length === 1`, `orphans: []`
 - `compact_boundary`가 아닌데 `parentUuid: null`인 root (즉 진짜 세션 시작점) → orphan이 아니라 정상 root로 분류. `Segment.rootSubtype`으로 구분 가능하게 한다
+- root가 `compact_boundary`이고 원본 레코드에 `logicalParentUuid`가 있음 → `Segment.rootLogicalParentUuid`에 그 값을 그대로 담는다. 실측(두 세션 파일, 332건)에서는 100% 존재했으나 필드 자체가 비공개 스키마이므로 없는 경우도 정의한다: 없으면 `null` (ADR-0005)
 
 ## 성능 요구사항
 
@@ -98,3 +107,4 @@ function buildIndexFromFile(
 - 끊긴 지점을 실제로 잇는 기능 (`reattach` 명령 — 별도 Spec)
 - 세션을 웹에서 시각화하는 기능 (`serve` 명령 — 별도 Spec)
 - 재개 후 실질 회상 여부 검증 — 이는 사람이 직접 해야 함 (ADR-0002, `src/cli/CLAUDE.md` "보고 규칙" 참고). `inspect`는 구조적 사실만 보고한다
+- 여러 세션 파일을 하나로 병합해 인덱싱하는 기능 (예: `--fork-session` 원본과 fork 파일 병합). 단일 파일 내 끊김과는 다른 문제 도메인(파일 간 uuid 중복 해소, 순서 재구성)이라 이 명령을 포함해 5개 명령 모두 단일 `<file>` 인자만 받는다
