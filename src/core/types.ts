@@ -291,22 +291,29 @@ export interface CliSchema {
  */
 export type SuggestedParentSource = "recorded" | "inferred";
 
-export interface SegmentDetail {
+/**
+ * `suggestedReattachCommand`와 `suggestedParentSource`는 항상 함께 `null`이거나
+ * 함께 non-null인 불변식을 갖는다 (#29/#30 리뷰) — discriminated union으로
+ * 표현해 호출부가 `if (detail.suggestedReattachCommand)`로 좁히면 같은 분기
+ * 안에서 `suggestedParentSource`도 non-null로 좁혀지게 한다. 이전에는 두
+ * 필드가 독립된 `string | null`/`SuggestedParentSource | null`이라 이
+ * 관계를 타입 시스템이 몰랐고, 호출부가 `!`로 우회해야 했다.
+ */
+export type SegmentDetail = {
   readonly segment: Segment;
   /** 이 세그먼트에 속한 노드들 (root → leaf 순서). 본문은 포함하지 않는다. */
   readonly nodes: readonly NodeIndex[];
-  /** root가 compact_boundary일 때 화면에 표시할 재연결 명령어. 아니면 null. */
-  readonly suggestedReattachCommand: string | null;
-  /**
-   * `suggestedReattachCommand`가 `null`이면 `null`.
-   *
-   * Spec의 타입 블록에는 없지만, 같은 Spec 본문이 "어느 경로로 값을
-   * 채웠는지는 화면에 노출한다"를 요구한다. 명령어 문자열만으로는 그
-   * 구분이 불가능해 필드를 추가했다 — 발견된 Spec 공백을 구현 시점에
-   * 보완한 것이며, 기준을 결과에 맞춰 고친 것이 아니다.
-   */
-  readonly suggestedParentSource: SuggestedParentSource | null;
-}
+} & (
+  | {
+      readonly suggestedReattachCommand: null;
+      readonly suggestedParentSource: null;
+    }
+  | {
+      /** root가 compact_boundary일 때 화면에 표시할 재연결 명령어. */
+      readonly suggestedReattachCommand: string;
+      readonly suggestedParentSource: SuggestedParentSource;
+    }
+);
 
 export interface NodeBody {
   readonly uuid: string;

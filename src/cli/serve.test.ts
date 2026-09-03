@@ -137,6 +137,17 @@ test("serve: 정적 루트 밖으로 나가는 경로는 404", async () => {
   });
 });
 
+test("serve: 정적 루트에 테스트 산출물이 섞여 노출되지 않는다", async () => {
+  // src/web/CLAUDE.md "이 스코프가 하지 않는 것" — serveStatic은 파일명
+  // allowlist 없이 정적 루트 안의 파일을 그대로 응답하므로, 빌드 산출물
+  // 배치가 곧 노출 범위다. 2026-09-03 리뷰에서 dist/web/에 format.test.js가
+  // 섞여 나온 회귀가 실제로 있었다 (scripts/copy-web-assets.js).
+  await withServer("compact-split", async (base) => {
+    const res = await fetch(`${base}/format.test.js`);
+    assert.equal(res.status, 404);
+  });
+});
+
 test("serve: 빈 파일도 정상 기동하고 세그먼트 0개를 응답한다", async () => {
   await withServer("empty", async (base) => {
     const res = await fetch(`${base}/api/index`);
