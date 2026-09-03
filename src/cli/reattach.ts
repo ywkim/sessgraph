@@ -162,7 +162,7 @@ export async function runReattach(argv: readonly string[]): Promise<number> {
 }
 
 /** `ReattachValidationError`의 코드별로 실행 가능한 다음 행동을 제시한다. */
-function nextActionsFor(code: ErrorCode): readonly string[] {
+export function nextActionsFor(code: ErrorCode): readonly string[] {
   if (code === "AMBIGUOUS_DUPLICATE") {
     return ["sessgraph inspect --json"];
   }
