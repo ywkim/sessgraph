@@ -242,6 +242,42 @@ export interface CommandEnvelope<T> {
   readonly warnings: readonly CommandWarning[];
 }
 
+/** `schema` 명령이 광고하는 명령 하나의 인터페이스 기술. */
+export interface PositionalDescriptor {
+  readonly name: string;
+  readonly required: boolean;
+  readonly description: string;
+}
+
+export interface OptionDescriptor {
+  readonly name: string;
+  readonly type: "string" | "boolean";
+  readonly required: boolean;
+  readonly default: string | boolean | null;
+  readonly description: string;
+}
+
+export interface CommandDescriptor {
+  readonly name: string;
+  readonly summary: string;
+  /** true면 세션 파일을 수정할 수 있다 (--commit 동반 시) */
+  readonly writes: boolean;
+  readonly positionals: readonly PositionalDescriptor[];
+  readonly options: readonly OptionDescriptor[];
+  readonly example: string;
+}
+
+/** `schema` 명령의 결과. `src/cli/registry.ts`의 단일 정의에서 파생된다. */
+export interface CliSchema {
+  readonly tool: "sessgraph";
+  /** 이 규약 자체의 판 번호. 봉투나 코드 열거가 비호환으로 바뀌면 올린다 */
+  readonly schemaVersion: 1;
+  readonly commands: readonly CommandDescriptor[];
+  readonly exitCodes: readonly { code: 0 | 1 | 2; meaning: string }[];
+  readonly errorCodes: readonly ErrorCode[];
+  readonly warningCodes: readonly WarningCode[];
+}
+
 /* ── serve (docs/spec/20260902-0420-serve-command.spec.md) ────────────────── */
 
 export interface SegmentDetail {
