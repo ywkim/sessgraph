@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import type { Server } from "node:http";
 import {
+  appendFileSync,
   copyFileSync,
   mkdtempSync,
   readFileSync,
@@ -167,6 +168,35 @@ test("serve: reattach로 원본이 바뀌면 낡은 세그먼트 root는 /api/se
     // 최신 구조 기준으로 정확히 404여야 한다("낡은 200"이 아니라).
     const after = await fetch(`${base}/api/segment/${U(3)}`);
     assert.equal(after.status, 404);
+  });
+});
+
+test("serve: append만 발생해도 409 없이 200 + 노드 수 증가를 반영한다", async () => {
+  // 이 PR(#34)의 존재 이유가 바로 이 시나리오다 — reattach 같은 필드
+  // 치환이 아니라 진행 중인 세션의 순수 append. mutation 케이스(위
+  // 테스트들)가 더 어려운 케이스라 append가 별도로 실패할 이유는 없어
+  // 보이지만, 이 시나리오를 검증하는 자동 회귀 테스트가 없으면 나중에
+  // `refreshIfStale`을 리팩터링하다 조용히 다시 깨뜨려도 CI가 못
+  // 잡는다(2026-09-03 리뷰).
+  await withServer("compact-split", async (base, file) => {
+    const before = (await (
+      await fetch(`${base}/api/index`)
+    ).json()) as IndexResult;
+
+    appendFileSync(
+      file,
+      JSON.stringify({
+        uuid: U(6),
+        parentUuid: U(5),
+        type: "user",
+        timestamp: "2026-01-01T00:00:00.000Z",
+      }) + "\n",
+    );
+
+    const afterRes = await fetch(`${base}/api/index`);
+    assert.equal(afterRes.status, 200);
+    const after = (await afterRes.json()) as IndexResult;
+    assert.equal(after.nodeCount, before.nodeCount + 1);
   });
 });
 
