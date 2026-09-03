@@ -13,13 +13,22 @@ import type {
   SegmentDetail,
   NodeBody,
 } from "../core/types.js";
-import { summarizeRaw, formatTime, escapeHtml } from "./format.js";
+import {
+  summarizeRaw,
+  formatTime,
+  escapeHtml,
+  describeIndexChange,
+} from "./format.js";
 
 const ROW_HEIGHT = 52; // .node 한 줄의 고정 높이 (가상 스크롤 계산 기준)
 const OVERSCAN = 5;
+const POLL_INTERVAL_MS = 5000; // 세션이 진행 중이면 계속 append된다 — 서버는
+// #34부터 매 요청 최신 상태를 낼 수 있지만, 브라우저는 이 폴링 없이는 첫
+// 로드 이후 새 내용을 영영 모른다.
 
 const summaryEl = document.getElementById("summary")!;
 const bannerEl = document.getElementById("banner")!;
+const updateBannerEl = document.getElementById("update-banner")!;
 const warningsEl = document.getElementById("warnings")!;
 const timelineEl = document.getElementById("timeline")!;
 
@@ -53,12 +62,63 @@ async function main(): Promise<void> {
 
   if (index.segments.length === 0) {
     timelineEl.innerHTML = `<p class="muted">표시할 기록이 없습니다</p>`;
-    return;
+  } else {
+    for (const segment of index.segments) {
+      timelineEl.append(renderSegment(segment));
+    }
   }
 
-  for (const segment of index.segments) {
-    timelineEl.append(renderSegment(segment));
-  }
+  startPolling(index.nodeCount);
+}
+
+/**
+ * `/api/index`를 주기적으로 다시 불러 노드 수 변화를 감지한다.
+ *
+ * 화면을 자동으로 다시 그리거나 가상 스크롤 목록에 새 노드를 끼워넣지
+ * 않는다 — 사용자가 펼쳐 보던 세그먼트나 스크롤 위치를 조용히 바꾸지
+ * 않기 위해서다(src/web/CLAUDE.md "표시 규칙" — 사용자를 놀라게 하지
+ * 않는다). 대신 배너로만 알리고, 반영은 사용자가 새로고침을 눌러야
+ * 일어난다.
+ *
+ * 변화를 한 번 감지하면 폴링을 멈춘다 — 배너 문구가 계속 바뀌며 읽는
+ * 도중 깜빡이는 걸 피하고, 어차피 다음 신호는 "새로고침하세요"뿐이다.
+ */
+function startPolling(initialNodeCount: number): void {
+  let checking = false;
+  const timer = setInterval(() => {
+    if (checking) return; // 이전 폴링이 아직 안 끝났으면 이번 틱은 건너뛴다
+    checking = true;
+    getJson<IndexResult>("/api/index")
+      .then((index) => {
+        const message = describeIndexChange(initialNodeCount, index.nodeCount);
+        if (message) {
+          showUpdateBanner(message);
+          clearInterval(timer);
+        }
+      })
+      .catch(() => {
+        // 폴링 실패는 조용히 넘어간다 — 다음 주기에 다시 시도한다. 이미
+        // 보고 있는 화면을 일시적 네트워크 문제로 어지럽히지 않는다.
+      })
+      .finally(() => {
+        checking = false;
+      });
+  }, POLL_INTERVAL_MS);
+}
+
+function showUpdateBanner(message: string): void {
+  updateBannerEl.textContent = "";
+  const text = document.createElement("span");
+  text.textContent = `${message} — `;
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "copy";
+  button.textContent = "새로고침";
+  button.addEventListener("click", () => {
+    location.reload();
+  });
+  updateBannerEl.append(text, button);
+  updateBannerEl.hidden = false;
 }
 
 /** 도구가 판단하지 못한 케이스를 숨기지 않는다 (ADR-0004). */

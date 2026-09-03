@@ -41,6 +41,7 @@ h1 {
 }
 
 #banner,
+#update-banner,
 #warnings,
 #timeline {
   max-width: 900px;
@@ -54,6 +55,24 @@ h1 {
   border-radius: 6px;
   color: var(--cut);
   background: #fff6f1;
+}
+
+/* 오류(#banner)와 구분되는 차분한 톤 — 새 내용이 있다는 건 정상이지
+   경고가 아니다. */
+#update-banner {
+  display: flex;
+  align-items: center;
+  margin-bottom: 16px;
+  padding: 10px 12px;
+  border: 1px solid #2f6fb8;
+  border-radius: 6px;
+  color: #2f6fb8;
+  background: #eef5fc;
+}
+
+#update-banner button.copy {
+  border-color: #2f6fb8;
+  color: #2f6fb8;
 }
 
 .warning {

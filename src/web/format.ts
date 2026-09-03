@@ -29,6 +29,25 @@ export function summarizeRaw(raw: string): string {
   return raw.slice(0, 300);
 }
 
+/**
+ * 폴링으로 받은 최신 `nodeCount`를 최초 로드 시점과 비교해, 사용자에게
+ * 보여줄 알림 문구를 만든다. 변화가 없으면 `null` — 배너를 안 띄운다.
+ *
+ * 늘었으면(가장 흔한 경우 — 세션이 계속 append됨) 정확한 증가량을 보여주고,
+ * 줄었거나 같은 개수로 바뀐 경우(reattach가 조각을 병합·분리)는 정확한
+ * 증가량이 의미가 없으므로 "구조가 바뀌었다"고만 알린다.
+ */
+export function describeIndexChange(
+  previousNodeCount: number,
+  currentNodeCount: number,
+): string | null {
+  if (currentNodeCount === previousNodeCount) return null;
+  if (currentNodeCount > previousNodeCount) {
+    return `새 노드 ${currentNodeCount - previousNodeCount}개가 추가됐습니다`;
+  }
+  return "세션 구조가 바뀌었습니다";
+}
+
 export function formatTime(timestamp: string | null): string {
   if (!timestamp) return "";
   return timestamp.replace("T", " ").slice(0, 19);

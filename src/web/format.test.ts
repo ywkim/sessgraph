@@ -1,7 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { summarizeRaw, formatTime, escapeHtml } from "./format.js";
+import {
+  summarizeRaw,
+  formatTime,
+  escapeHtml,
+  describeIndexChange,
+} from "./format.js";
 
 test("summarizeRaw: message.content가 문자열이면 그대로 반환한다", () => {
   const raw = JSON.stringify({ message: { content: "hello" } });
@@ -79,4 +84,16 @@ test("escapeHtml: HTML 특수문자를 이스케이프한다", () => {
 
 test("escapeHtml: 문자열이 아닌 값도 String()으로 변환한다", () => {
   assert.equal(escapeHtml(42), "42");
+});
+
+test("describeIndexChange: 노드 수가 같으면 null(알림 없음)", () => {
+  assert.equal(describeIndexChange(10, 10), null);
+});
+
+test("describeIndexChange: 노드 수가 늘면 정확한 증가량을 알린다", () => {
+  assert.equal(describeIndexChange(10, 13), "새 노드 3개가 추가됐습니다");
+});
+
+test("describeIndexChange: 노드 수가 줄면 구조 변경만 알린다(정확한 수를 주장하지 않는다)", () => {
+  assert.equal(describeIndexChange(10, 7), "세션 구조가 바뀌었습니다");
 });
