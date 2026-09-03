@@ -4,6 +4,7 @@ import { runInspect } from "./inspect.js";
 import { runReattach } from "./reattach.js";
 import { runRevert } from "./revert.js";
 import { runSchema } from "./schema.js";
+import { runServe } from "./serve.js";
 import { runVerify } from "./verify.js";
 
 const [, , command, ...rest] = process.argv;
@@ -24,6 +25,11 @@ switch (command) {
   }
   case "revert": {
     const exitCode = await runRevert(rest);
+    process.exit(exitCode);
+    break;
+  }
+  case "serve": {
+    const exitCode = await runServe(rest);
     process.exit(exitCode);
     break;
   }
@@ -57,7 +63,7 @@ function failUnknownCommand(
   } else {
     console.error(`알 수 없는 명령: ${command ?? "(없음)"}`);
     console.error(
-      "사용 가능한 명령: inspect, reattach, verify, revert, schema",
+      "사용 가능한 명령: inspect, reattach, verify, revert, serve, schema",
     );
   }
   return 2;

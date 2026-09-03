@@ -12,7 +12,7 @@
     "sessgraph": "dist/cli/index.js"
   },
   "scripts": {
-    "build": "tsc",
+    "build": "tsc && node scripts/copy-web-assets.js",
     "type-check": "tsc --noEmit",
     "test": "npm run build && node --test dist/**/*.test.js",
     "lint": "eslint .",

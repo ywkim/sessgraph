@@ -1,0 +1,213 @@
+:root {
+  --fg: #1c1c1e;
+  --muted: #6b6b70;
+  --line: #d8d8dc;
+  --bg: #fbfbfd;
+  --panel: #fff;
+  --cut: #b8531f;
+  --warn: #8a6d00;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  padding: 24px 20px 64px;
+  font:
+    14px/1.6 ui-sans-serif,
+    -apple-system,
+    "Apple SD Gothic Neo",
+    sans-serif;
+  color: var(--fg);
+  background: var(--bg);
+}
+
+header {
+  max-width: 900px;
+  margin: 0 auto 16px;
+}
+
+h1 {
+  margin: 0;
+  font-size: 18px;
+  letter-spacing: 0.02em;
+}
+
+.muted {
+  color: var(--muted);
+  margin: 4px 0 0;
+}
+
+#banner,
+#warnings,
+#timeline {
+  max-width: 900px;
+  margin: 0 auto;
+}
+
+#banner {
+  margin-bottom: 16px;
+  padding: 10px 12px;
+  border: 1px solid var(--cut);
+  border-radius: 6px;
+  color: var(--cut);
+  background: #fff6f1;
+}
+
+.warning {
+  margin-bottom: 8px;
+  padding: 8px 12px;
+  border-left: 3px solid var(--warn);
+  color: var(--warn);
+  background: #fffaea;
+}
+
+/* 세로 타임라인 고정 배치 — force-directed를 쓰지 않는 이유는
+   src/web/CLAUDE.md "렌더링 제약" 참고. */
+.segment {
+  position: relative;
+  margin: 0 0 4px 16px;
+  padding-left: 20px;
+  border-left: 2px solid var(--line);
+}
+
+.segment::before {
+  content: "";
+  position: absolute;
+  left: -6px;
+  top: 16px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--line);
+}
+
+.segment.cut {
+  border-left-color: var(--cut);
+}
+
+.segment.cut::before {
+  background: var(--cut);
+}
+
+.segment-head {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  width: 100%;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.segment-head:hover {
+  border-color: var(--muted);
+}
+
+.badge {
+  flex: none;
+  padding: 1px 7px;
+  border-radius: 10px;
+  font-size: 11px;
+  background: #eee;
+  color: var(--muted);
+}
+
+.badge.cut {
+  background: #fbe6da;
+  color: var(--cut);
+}
+
+.grow {
+  flex: 1;
+}
+
+.uuid {
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  font-size: 12px;
+}
+
+.segment-body {
+  padding: 8px 0 16px;
+}
+
+.reattach {
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  border: 1px dashed var(--line);
+  border-radius: 6px;
+  background: var(--panel);
+}
+
+.reattach code {
+  display: block;
+  margin: 6px 0;
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  font-size: 12px;
+  word-break: break-all;
+}
+
+.reattach .inferred {
+  color: var(--cut);
+}
+
+button.copy {
+  padding: 3px 10px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--bg);
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+}
+
+/* 가상 스크롤 뷰포트 — 화면에 보이는 노드만 DOM에 올린다. */
+.viewport {
+  height: 420px;
+  overflow-y: auto;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel);
+}
+
+.spacer {
+  position: relative;
+}
+
+.node {
+  position: absolute;
+  left: 0;
+  right: 0;
+  padding: 6px 12px;
+  border-bottom: 1px solid #f0f0f2;
+  overflow: hidden;
+}
+
+.node-head {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+}
+
+.node-type {
+  flex: none;
+  width: 72px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.node-body {
+  margin: 2px 0 0 80px;
+  color: var(--muted);
+  font-size: 12px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 2.6em;
+  overflow: hidden;
+}

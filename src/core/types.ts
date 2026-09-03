@@ -280,12 +280,32 @@ export interface CliSchema {
 
 /* ── serve (docs/spec/20260902-0420-serve-command.spec.md) ────────────────── */
 
+/**
+ * `suggestedReattachCommand`의 `--parent` 값을 어디서 가져왔는지.
+ *
+ * `recorded`는 `compact_boundary` 레코드에 기록된 `logicalParentUuid`,
+ * `inferred`는 그 값이 없어 직전 세그먼트의 leaf로 추정한 값이다. "직전
+ * leaf" 단독 가정은 실측 두 파일에서 각각 44%, 9.5% 틀렸으므로
+ * (ADR-0005) 화면이 둘을 구분해 표시해야 한다
+ * (docs/spec/20260902-0420-serve-command.spec.md "데이터 모델").
+ */
+export type SuggestedParentSource = "recorded" | "inferred";
+
 export interface SegmentDetail {
   readonly segment: Segment;
   /** 이 세그먼트에 속한 노드들 (root → leaf 순서). 본문은 포함하지 않는다. */
   readonly nodes: readonly NodeIndex[];
   /** root가 compact_boundary일 때 화면에 표시할 재연결 명령어. 아니면 null. */
   readonly suggestedReattachCommand: string | null;
+  /**
+   * `suggestedReattachCommand`가 `null`이면 `null`.
+   *
+   * Spec의 타입 블록에는 없지만, 같은 Spec 본문이 "어느 경로로 값을
+   * 채웠는지는 화면에 노출한다"를 요구한다. 명령어 문자열만으로는 그
+   * 구분이 불가능해 필드를 추가했다 — 발견된 Spec 공백을 구현 시점에
+   * 보완한 것이며, 기준을 결과에 맞춰 고친 것이 아니다.
+   */
+  readonly suggestedParentSource: SuggestedParentSource | null;
 }
 
 export interface NodeBody {
