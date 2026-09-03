@@ -1,24 +1,45 @@
 // 이 파일은 JSONL을 파싱하지 않는다. 세그먼트·orphan 판정은 이미 src/core가
 // 끝낸 결과(/api/index)를 받아 그리기만 한다 (src/web/CLAUDE.md).
+//
+// `import type`만 core에서 가져온다 — 런타임에는 완전히 소거되므로 번들러 없이
+// 이 파일 그대로 브라우저에 ESM으로 서빙할 수 있으면서도, `IndexResult` 등의
+// 필드가 바뀌면 컴파일러가 여기를 잡는다 (ADR-0001 "컴파일러가 모든 사용처를
+// 잡아준다"를 웹 경계까지 적용).
+
+import type {
+  IndexResult,
+  NodeIndex,
+  SegmentDetail,
+  NodeBody,
+} from "../core/types.js";
 
 const ROW_HEIGHT = 52; // .node 한 줄의 고정 높이 (가상 스크롤 계산 기준)
 const OVERSCAN = 5;
 
-const summaryEl = document.getElementById("summary");
-const bannerEl = document.getElementById("banner");
-const warningsEl = document.getElementById("warnings");
-const timelineEl = document.getElementById("timeline");
+const summaryEl = document.getElementById("summary")!;
+const bannerEl = document.getElementById("banner")!;
+const warningsEl = document.getElementById("warnings")!;
+const timelineEl = document.getElementById("timeline")!;
 
-const bodyCache = new Map();
+const bodyCache = new Map<string, string>();
 
-main();
+class HttpError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+  ) {
+    super(message);
+  }
+}
 
-async function main() {
-  let index;
+void main();
+
+async function main(): Promise<void> {
+  let index: IndexResult;
   try {
-    index = await getJson("/api/index");
+    index = await getJson<IndexResult>("/api/index");
   } catch (err) {
-    showBanner(`인덱스를 읽지 못했습니다: ${err.message}`);
+    showBanner(`인덱스를 읽지 못했습니다: ${(err as Error).message}`);
     return;
   }
 
@@ -39,8 +60,8 @@ async function main() {
 }
 
 /** 도구가 판단하지 못한 케이스를 숨기지 않는다 (ADR-0004). */
-function renderWarnings(index) {
-  const items = [];
+function renderWarnings(index: IndexResult): void {
+  const items: string[] = [];
   if (index.unresolvedDuplicates.length > 0) {
     items.push(
       `해소되지 않은 중복 uuid ${index.unresolvedDuplicates.length}건 — ` +
@@ -64,7 +85,7 @@ function renderWarnings(index) {
   }
 }
 
-function renderSegment(segment) {
+function renderSegment(segment: IndexResult["segments"][number]): HTMLElement {
   // 끊김을 구분해 보이되 오류로 단정하지 않는다 — 컴팩트 경계는 정상
   // 동작의 결과다 (src/web/CLAUDE.md "표시 규칙").
   const isCut = segment.rootSubtype === "compact_boundary";
@@ -101,14 +122,21 @@ function renderSegment(segment) {
   return wrap;
 }
 
-async function loadDetail(rootUuid, container) {
+async function loadDetail(
+  rootUuid: string,
+  container: HTMLElement,
+): Promise<void> {
   container.innerHTML = `<p class="muted">불러오는 중…</p>`;
-  let detail;
+  let detail: SegmentDetail;
   try {
-    detail = await getJson(`/api/segment/${encodeURIComponent(rootUuid)}`);
+    detail = await getJson<SegmentDetail>(
+      `/api/segment/${encodeURIComponent(rootUuid)}`,
+    );
   } catch (err) {
     container.innerHTML = "";
-    container.append(errorLine(`조각을 불러오지 못했습니다: ${err.message}`));
+    container.append(
+      errorLine(`조각을 불러오지 못했습니다: ${(err as Error).message}`),
+    );
     return;
   }
 
@@ -119,7 +147,7 @@ async function loadDetail(rootUuid, container) {
   container.append(renderVirtualList(detail.nodes));
 }
 
-function renderReattach(detail) {
+function renderReattach(detail: SegmentDetail): HTMLElement {
   const box = document.createElement("div");
   box.className = "reattach";
 
@@ -135,8 +163,9 @@ function renderReattach(detail) {
   }
   box.append(label);
 
+  const command = detail.suggestedReattachCommand!;
   const code = document.createElement("code");
-  code.textContent = detail.suggestedReattachCommand;
+  code.textContent = command;
   box.append(code);
 
   // 웹 → CLI 핸드오프는 클립보드가 전부다. 중간 파일 포맷을 두지 않는다
@@ -147,7 +176,7 @@ function renderReattach(detail) {
   copy.textContent = "명령어 복사";
   copy.addEventListener("click", () => {
     void navigator.clipboard
-      .writeText(detail.suggestedReattachCommand)
+      .writeText(command)
       .then(() => {
         copy.textContent = "복사됨 — --reason을 채워서 실행하세요";
       })
@@ -164,7 +193,7 @@ function renderReattach(detail) {
  * 노드 수가 수천 개여도 화면에 보이는 것만 DOM에 올린다. 본문은 그 행이
  * 실제로 보일 때 `/api/body`로 한 줄씩 가져온다.
  */
-function renderVirtualList(nodes) {
+function renderVirtualList(nodes: readonly NodeIndex[]): HTMLElement {
   const viewport = document.createElement("div");
   viewport.className = "viewport";
   const spacer = document.createElement("div");
@@ -172,9 +201,9 @@ function renderVirtualList(nodes) {
   spacer.style.height = `${nodes.length * ROW_HEIGHT}px`;
   viewport.append(spacer);
 
-  const mounted = new Map();
+  const mounted = new Map<number, HTMLElement>();
 
-  function paint() {
+  function paint(): void {
     const first = Math.max(
       0,
       Math.floor(viewport.scrollTop / ROW_HEIGHT) - OVERSCAN,
@@ -193,7 +222,7 @@ function renderVirtualList(nodes) {
     }
     for (let i = first; i <= last; i++) {
       if (mounted.has(i)) continue;
-      const el = renderNode(nodes[i], i);
+      const el = renderNode(nodes[i]!, i);
       mounted.set(i, el);
       spacer.append(el);
     }
@@ -206,7 +235,7 @@ function renderVirtualList(nodes) {
   return viewport;
 }
 
-function renderNode(node, position) {
+function renderNode(node: NodeIndex, position: number): HTMLElement {
   const el = document.createElement("div");
   el.className = "node";
   el.style.top = `${position * ROW_HEIGHT}px`;
@@ -218,7 +247,7 @@ function renderNode(node, position) {
       <span class="muted">${formatTime(node.timestamp)}</span>
     </div>
     <div class="node-body">불러오는 중…</div>`;
-  const bodyEl = el.querySelector(".node-body");
+  const bodyEl = el.querySelector<HTMLElement>(".node-body")!;
 
   const cached = bodyCache.get(node.uuid);
   if (cached !== undefined) {
@@ -226,15 +255,16 @@ function renderNode(node, position) {
     return el;
   }
 
-  getJson(`/api/body?uuid=${encodeURIComponent(node.uuid)}`)
+  getJson<NodeBody>(`/api/body?uuid=${encodeURIComponent(node.uuid)}`)
     .then((body) => {
       const text = summarizeRaw(body.raw);
       bodyCache.set(node.uuid, text);
       bodyEl.textContent = text;
     })
-    .catch((err) => {
-      bodyEl.textContent = `본문을 읽지 못했습니다: ${err.message}`;
-      if (err.status === 409) showBanner(err.message);
+    .catch((err: unknown) => {
+      const error = err as HttpError;
+      bodyEl.textContent = `본문을 읽지 못했습니다: ${error.message}`;
+      if (error.status === 409) showBanner(error.message);
     });
 
   return el;
@@ -244,19 +274,20 @@ function renderNode(node, position) {
  * 본문 한 줄에서 사람이 읽을 부분만 뽑는다. 그래프 구조를 다시 계산하지는
  * 않는다 — 여기서 파싱하는 것은 표시용 텍스트뿐이다.
  */
-function summarizeRaw(raw) {
-  let parsed;
+function summarizeRaw(raw: string): string {
+  let parsed: unknown;
   try {
     parsed = JSON.parse(raw);
   } catch {
     return raw.slice(0, 300);
   }
-  const content = parsed?.message?.content;
+  const content = (parsed as { message?: { content?: unknown } })?.message
+    ?.content;
   if (typeof content === "string") return content;
   if (Array.isArray(content)) {
-    return content
+    return (content as { type?: string; text?: string; name?: string }[])
       .map((part) => {
-        if (part?.type === "text") return part.text;
+        if (part?.type === "text") return part.text ?? "";
         if (part?.type === "tool_use") return `[도구 ${part.name}]`;
         if (part?.type === "tool_result") return "[도구 결과]";
         return `[${part?.type ?? "?"}]`;
@@ -267,44 +298,48 @@ function summarizeRaw(raw) {
   return raw.slice(0, 300);
 }
 
-function showBanner(message) {
+function showBanner(message: string): void {
   bannerEl.textContent = message;
   bannerEl.hidden = false;
 }
 
-function errorLine(message) {
+function errorLine(message: string): HTMLElement {
   const p = document.createElement("p");
   p.className = "warning";
   p.textContent = message;
   return p;
 }
 
-async function getJson(url) {
+async function getJson<T>(url: string): Promise<T> {
   const res = await fetch(url);
   if (!res.ok) {
-    const payload = await res.json().catch(() => ({}));
-    const err = new Error(payload.error ?? `HTTP ${res.status}`);
-    err.status = res.status;
-    throw err;
+    const payload: unknown = await res.json().catch(() => ({}));
+    const message = (payload as { error?: unknown })?.error;
+    throw new HttpError(
+      typeof message === "string" ? message : `HTTP ${res.status}`,
+      res.status,
+    );
   }
-  return res.json();
+  return (await res.json()) as T;
 }
 
-function formatTime(timestamp) {
+function formatTime(timestamp: string | null): string {
   if (!timestamp) return "";
   return timestamp.replace("T", " ").slice(0, 19);
 }
 
-function escapeHtml(value) {
+function escapeHtml(value: unknown): string {
   return String(value).replace(
     /[&<>"']/g,
     (c) =>
-      ({
-        "&": "&amp;",
-        "<": "&lt;",
-        ">": "&gt;",
-        '"': "&quot;",
-        "'": "&#39;",
-      })[c],
+      (
+        ({
+          "&": "&amp;",
+          "<": "&lt;",
+          ">": "&gt;",
+          '"': "&quot;",
+          "'": "&#39;",
+        }) as Record<string, string>
+      )[c]!,
   );
 }

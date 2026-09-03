@@ -1,0 +1,17 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "lib": ["ES2023", "DOM"],
+    "types": [],
+    // rootDir는 상속된 "src"를 그대로 쓴다 — app.ts가 `import type`으로
+    // src/core/types.ts를 참조하므로, tsc 프로그램에 그 파일도 포함되고
+    // rootDir가 두 파일의 공통 조상이어야 한다(TS6059). outDir을 임시
+    // 경로로 두고, scripts/copy-web-assets.js가 실제로 필요한
+    // `web/app.js`만 `dist/web/`로 옮긴 뒤 임시 경로를 지운다.
+    "outDir": "dist/.web-build",
+    "declaration": false,
+    "sourceMap": false
+  },
+  "include": ["src/web/**/*.ts"],
+  "exclude": ["node_modules", "dist"]
+}
