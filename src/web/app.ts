@@ -9,6 +9,7 @@
 import type {
   IndexResult,
   NodeIndex,
+  Segment,
   SegmentDetail,
   NodeBody,
 } from "../core/types.js";
@@ -85,7 +86,7 @@ function renderWarnings(index: IndexResult): void {
   }
 }
 
-function renderSegment(segment: IndexResult["segments"][number]): HTMLElement {
+function renderSegment(segment: Segment): HTMLElement {
   // 끊김을 구분해 보이되 오류로 단정하지 않는다 — 컴팩트 경계는 정상
   // 동작의 결과다 (src/web/CLAUDE.md "표시 규칙").
   const isCut = segment.rootSubtype === "compact_boundary";
