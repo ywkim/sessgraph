@@ -230,9 +230,7 @@ test("runReattach: --json --commit은 봉투에 ReattachResult를 담고 stderr�
     w.includes('"command":"reattach"'),
   );
   assert.ok(envelopeLine, "reattach 봉투가 stdout에 쓰여야 합니다");
-  const envelope = JSON.parse(
-    envelopeLine,
-  ) as CommandEnvelope<ReattachResult>;
+  const envelope = JSON.parse(envelopeLine) as CommandEnvelope<ReattachResult>;
   assert.equal(envelope.ok, true);
   assert.equal(envelope.command, "reattach");
   assert.equal(envelope.error, null);
