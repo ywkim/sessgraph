@@ -198,6 +198,50 @@ export interface RevertResult {
   readonly surgeryLogPath?: string;
 }
 
+/* ── 기계 판독 출력 (docs/spec/20260903-1218-machine-readable-output.spec.md) ── */
+
+/** 실패 사유를 문자열 코드로 구분한다 — 메시지 문구를 분기 근거로 쓰지 않는다. */
+export type ErrorCode =
+  | "UNKNOWN_COMMAND"
+  | "MISSING_ARGUMENT"
+  | "UNKNOWN_ARGUMENT"
+  | "FILE_NOT_FOUND"
+  | "FILE_NOT_WRITABLE"
+  | "TARGET_NOT_FOUND"
+  | "PARENT_NOT_FOUND"
+  | "AMBIGUOUS_DUPLICATE"
+  | "CYCLE_DETECTED"
+  | "NOT_REATTACHABLE"
+  | "EMPTY_REASON"
+  | "SCHEMA_DRIFT";
+
+export type WarningCode = "KEYS_DROPPED";
+
+export interface CommandWarning {
+  readonly code: WarningCode;
+  readonly message: string;
+}
+
+export interface CommandError {
+  readonly code: ErrorCode;
+  /** 사람용 한국어 메시지. 분기 근거로 쓰지 않는다 */
+  readonly message: string;
+  /** 실행 가능한 명령 문자열. 없으면 빈 배열 */
+  readonly nextActions: readonly string[];
+}
+
+/**
+ * 모든 명령이 `--json`에서 공유하는 최상위 형태.
+ * `ok === true` ⟺ `error === null` ⟺ `result !== null` (Spec "불변식").
+ */
+export interface CommandEnvelope<T> {
+  readonly ok: boolean;
+  readonly command: string | null;
+  readonly result: T | null;
+  readonly error: CommandError | null;
+  readonly warnings: readonly CommandWarning[];
+}
+
 /* ── serve (docs/spec/20260902-0420-serve-command.spec.md) ────────────────── */
 
 export interface SegmentDetail {
