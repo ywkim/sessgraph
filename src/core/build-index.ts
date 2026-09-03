@@ -73,6 +73,21 @@ class IndexAccumulator {
     else this.occurrencesByUuid.set(uuid, [occurrence]);
   }
 
+  private nodesSnapshot: ReadonlyMap<string, NodeIndex> = new Map();
+
+  /**
+   * `finalize()` 호출 후 접근 가능한 uuid→NodeIndex 조회 테이블.
+   * `IndexResult`는 세그먼트 root/leaf만 노출하므로, 임의 uuid의 부모를
+   * 찾아야 하는 `reattach`(순환 검사, 존재 확인)는 이 맵이 필요하다
+   * (docs/spec/20260901-2309-reattach-command.spec.md — Spec이 명시한
+   * `buildReattachPlan(index, uuid, parent)` 시그니처만으로는 부모 조회가
+   * 불가능해 확장했다. `IndexResult` 자체는 바꾸지 않는다 — 골든 픽스처
+   * 계약을 건드리지 않기 위해서다).
+   */
+  getNodes(): ReadonlyMap<string, NodeIndex> {
+    return this.nodesSnapshot;
+  }
+
   finalize(policy: DuplicatePolicy, start: number): IndexResult {
     // 시끄러운 실패: uuid 레코드는 있는데 parentUuid 필드가 전멸 → 스키마 변경 의심
     // (src/core/CLAUDE.md "시끄러운 실패", ADR-0004)
@@ -134,6 +149,8 @@ class IndexAccumulator {
       if (siblings) siblings.push(node);
       else childrenByParent.set(node.parentUuid, [node]);
     }
+
+    this.nodesSnapshot = nodes;
 
     const roots = [...nodes.values()].filter((n) => n.parentUuid === null);
 
@@ -229,7 +246,27 @@ export function buildIndexFromFile(
 ): IndexResult {
   const start = performance.now();
   const acc = new IndexAccumulator();
+  feedFile(acc, filePath);
+  return acc.finalize(policy, start);
+}
 
+/**
+ * `buildIndexFromFile`과 같은 계산을 하되, uuid→NodeIndex 조회 테이블도
+ * 함께 반환한다. `reattach`가 대상/부모 존재 확인과 순환 검사에 쓴다
+ * (docs/spec/20260901-2309-reattach-command.spec.md).
+ */
+export function buildIndexDetailed(
+  filePath: string,
+  policy: DuplicatePolicy = "prefer-parent",
+): { index: IndexResult; nodes: ReadonlyMap<string, NodeIndex> } {
+  const start = performance.now();
+  const acc = new IndexAccumulator();
+  feedFile(acc, filePath);
+  const index = acc.finalize(policy, start);
+  return { index, nodes: acc.getNodes() };
+}
+
+function feedFile(acc: IndexAccumulator, filePath: string): void {
   const fd = openSync(filePath, "r");
   try {
     const fileSize = statSync(filePath).size;
@@ -268,8 +305,6 @@ export function buildIndexFromFile(
   } finally {
     closeSync(fd);
   }
-
-  return acc.finalize(policy, start);
 }
 
 /**
