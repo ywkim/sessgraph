@@ -12,7 +12,10 @@ const VALID_POLICIES: readonly DuplicatePolicy[] = [
   "prefer-parent",
 ];
 
-export function runInspect(argv: readonly string[]): number {
+export function runInspect(
+  argv: readonly string[],
+  write?: (chunk: string) => void,
+): number {
   let values: { json?: boolean; "duplicate-policy"?: string };
   let positionals: string[];
   try {
@@ -29,6 +32,7 @@ export function runInspect(argv: readonly string[]): number {
       false,
       "UNKNOWN_ARGUMENT",
       `인자 파싱 실패: ${(err as Error).message}`,
+      write,
     );
   }
 
@@ -38,6 +42,7 @@ export function runInspect(argv: readonly string[]): number {
       Boolean(values.json),
       "MISSING_ARGUMENT",
       "세션 파일 경로가 필요합니다",
+      write,
     );
   }
 
@@ -49,6 +54,7 @@ export function runInspect(argv: readonly string[]): number {
         Boolean(values.json),
         "UNKNOWN_ARGUMENT",
         `--duplicate-policy는 ${VALID_POLICIES.join(" | ")} 중 하나여야 합니다`,
+        write,
       );
     }
     policy = rawPolicy as DuplicatePolicy;
@@ -59,6 +65,7 @@ export function runInspect(argv: readonly string[]): number {
       Boolean(values.json),
       "FILE_NOT_FOUND",
       `파일을 찾을 수 없습니다: ${file}`,
+      write,
     );
   }
 
@@ -66,11 +73,16 @@ export function runInspect(argv: readonly string[]): number {
   try {
     index = buildIndexFromFile(file, policy);
   } catch (err) {
-    return fail(Boolean(values.json), "SCHEMA_DRIFT", (err as Error).message);
+    return fail(
+      Boolean(values.json),
+      "SCHEMA_DRIFT",
+      (err as Error).message,
+      write,
+    );
   }
 
   if (values.json) {
-    printEnvelope(okEnvelope("inspect", index));
+    printEnvelope(okEnvelope("inspect", index), write);
   } else {
     printHumanReport(index);
   }
@@ -81,9 +93,10 @@ function fail(
   json: boolean,
   code: Parameters<typeof errorEnvelope>[1],
   message: string,
+  write?: (chunk: string) => void,
 ): number {
   if (json) {
-    printEnvelope(errorEnvelope("inspect", code, message));
+    printEnvelope(errorEnvelope("inspect", code, message), write);
   } else {
     console.error(message);
   }

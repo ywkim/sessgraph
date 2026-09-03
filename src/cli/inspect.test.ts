@@ -19,11 +19,20 @@ function fixturePath(name: string): string {
   return path.join(fixturesDir, `${name}.anon.jsonl`);
 }
 
-/** console.log/error와 stdout.write(JSON 출력용)를 함께 캡처한다. */
+/**
+ * console.log/error를 캡처하고, `--json` 출력용 `write`는 전역
+ * `process.stdout.write`를 patch하는 대신 `runInspect`의 두 번째 인자로
+ * 직접 주입한다. 전역 patch를 `await` 경계 너머로 유지하면 Node v26
+ * test runner의 리포터가 깨져 형제 테스트가 등록에서 사라지는 문제가
+ * 있었다 — `src/cli/envelope.ts`의 `printEnvelope` 코멘트 참고.
+ * `runInspect`는 동기 함수라 원래는 안전하지만, 다른 CLI 테스트와
+ * 패턴을 통일해 같은 실수가 재도입되지 않게 한다.
+ */
 function captureOutput(): {
   logs: string[];
   errors: string[];
   writes: string[];
+  write: (chunk: string) => void;
   restore: () => void;
 } {
   const logs: string[] = [];
@@ -31,7 +40,6 @@ function captureOutput(): {
   const writes: string[] = [];
   const originalLog = console.log;
   const originalError = console.error;
-  const originalWrite = process.stdout.write.bind(process.stdout);
   console.log = (...args: unknown[]) => {
     logs.push(args.join(" "));
     return true;
@@ -40,20 +48,14 @@ function captureOutput(): {
     errors.push(args.join(" "));
     return true;
   };
-  const fakeWrite = (chunk: unknown): boolean => {
-    writes.push(String(chunk));
-    return true;
-  };
-  // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion -- 테스트 전용 stub, 콜백/encoding 오버로드는 안 씀
-  process.stdout.write = fakeWrite as typeof process.stdout.write;
   return {
     logs,
     errors,
     writes,
+    write: (chunk) => writes.push(chunk),
     restore: () => {
       console.log = originalLog;
       console.error = originalError;
-      process.stdout.write = originalWrite;
     },
   };
 }
@@ -62,7 +64,7 @@ test("runInspect: 사람용 출력은 세그먼트·orphan 요약을 포함한�
   const cap = captureOutput();
   let exitCode: number;
   try {
-    exitCode = runInspect([fixturePath("compact-split")]);
+    exitCode = runInspect([fixturePath("compact-split")], cap.write);
   } finally {
     cap.restore();
   }
@@ -77,7 +79,7 @@ test("runInspect: --json은 봉투에 IndexResult를 그대로 담는다", () =>
   const cap = captureOutput();
   let exitCode: number;
   try {
-    exitCode = runInspect([fixturePath("compact-split"), "--json"]);
+    exitCode = runInspect([fixturePath("compact-split"), "--json"], cap.write);
   } finally {
     cap.restore();
   }
@@ -99,7 +101,7 @@ test("runInspect: 파일이 없으면 종료 코드 2, --json이면 FILE_NOT_FOU
   const cap = captureOutput();
   let exitCode: number;
   try {
-    exitCode = runInspect(["/no/such/file.jsonl", "--json"]);
+    exitCode = runInspect(["/no/such/file.jsonl", "--json"], cap.write);
   } finally {
     cap.restore();
   }
@@ -115,7 +117,7 @@ test("runInspect: 파일 경로 누락은 종료 코드 2 (사람용)", () => {
   const cap = captureOutput();
   let exitCode: number;
   try {
-    exitCode = runInspect([]);
+    exitCode = runInspect([], cap.write);
   } finally {
     cap.restore();
   }
@@ -128,11 +130,10 @@ test("runInspect: 잘못된 --duplicate-policy는 UNKNOWN_ARGUMENT", () => {
   const cap = captureOutput();
   let exitCode: number;
   try {
-    exitCode = runInspect([
-      fixturePath("compact-split"),
-      "--duplicate-policy=bogus",
-      "--json",
-    ]);
+    exitCode = runInspect(
+      [fixturePath("compact-split"), "--duplicate-policy=bogus", "--json"],
+      cap.write,
+    );
   } finally {
     cap.restore();
   }
@@ -146,7 +147,7 @@ test("runInspect: orphan 픽스처는 orphans 배열을 채운다", () => {
   const cap = captureOutput();
   let exitCode: number;
   try {
-    exitCode = runInspect([fixturePath("orphan"), "--json"]);
+    exitCode = runInspect([fixturePath("orphan"), "--json"], cap.write);
   } finally {
     cap.restore();
   }
@@ -160,7 +161,10 @@ test("runInspect: 정책으로 해소되지 않은 중복은 unresolvedDuplicate
   const cap = captureOutput();
   let exitCode: number;
   try {
-    exitCode = runInspect([fixturePath("duplicate-parents"), "--json"]);
+    exitCode = runInspect(
+      [fixturePath("duplicate-parents"), "--json"],
+      cap.write,
+    );
   } finally {
     cap.restore();
   }
@@ -174,7 +178,7 @@ test("runInspect: 빈 파일은 정상 종료하고 노드 0개를 보고한다"
   const cap = captureOutput();
   let exitCode: number;
   try {
-    exitCode = runInspect([fixturePath("empty"), "--json"]);
+    exitCode = runInspect([fixturePath("empty"), "--json"], cap.write);
   } finally {
     cap.restore();
   }
@@ -188,7 +192,10 @@ test("runInspect: parentUuid 필드 전멸은 SCHEMA_DRIFT로 종료 코드 2", 
   const cap = captureOutput();
   let exitCode: number;
   try {
-    exitCode = runInspect([fixturePath("no-parent-field"), "--json"]);
+    exitCode = runInspect(
+      [fixturePath("no-parent-field"), "--json"],
+      cap.write,
+    );
   } finally {
     cap.restore();
   }

@@ -29,7 +29,10 @@ import type {
 } from "../core/types.js";
 import { errorEnvelope, okEnvelope, printEnvelope } from "./envelope.js";
 
-export async function runReattach(argv: readonly string[]): Promise<number> {
+export async function runReattach(
+  argv: readonly string[],
+  write?: (chunk: string) => void,
+): Promise<number> {
   let values: {
     uuid?: string;
     parent?: string;
@@ -55,6 +58,8 @@ export async function runReattach(argv: readonly string[]): Promise<number> {
       false,
       "UNKNOWN_ARGUMENT",
       `인자 파싱 실패: ${(err as Error).message}`,
+      [],
+      write,
     );
   }
 
@@ -62,19 +67,31 @@ export async function runReattach(argv: readonly string[]): Promise<number> {
 
   const file = positionals[0];
   if (!file) {
-    return fail(json, "MISSING_ARGUMENT", "세션 파일 경로가 필요합니다");
+    return fail(
+      json,
+      "MISSING_ARGUMENT",
+      "세션 파일 경로가 필요합니다",
+      [],
+      write,
+    );
   }
   if (!existsSync(file)) {
-    return fail(json, "FILE_NOT_FOUND", `파일을 찾을 수 없습니다: ${file}`);
+    return fail(
+      json,
+      "FILE_NOT_FOUND",
+      `파일을 찾을 수 없습니다: ${file}`,
+      [],
+      write,
+    );
   }
   if (!values.uuid) {
-    return fail(json, "MISSING_ARGUMENT", "--uuid는 필수입니다");
+    return fail(json, "MISSING_ARGUMENT", "--uuid는 필수입니다", [], write);
   }
   if (!values.parent) {
-    return fail(json, "MISSING_ARGUMENT", "--parent는 필수입니다");
+    return fail(json, "MISSING_ARGUMENT", "--parent는 필수입니다", [], write);
   }
   if (!values.reason || values.reason.trim() === "") {
-    return fail(json, "EMPTY_REASON", "사유를 입력해야 합니다");
+    return fail(json, "EMPTY_REASON", "사유를 입력해야 합니다", [], write);
   }
 
   let index;
@@ -82,7 +99,7 @@ export async function runReattach(argv: readonly string[]): Promise<number> {
   try {
     ({ index, nodes } = buildIndexDetailed(file));
   } catch (err) {
-    return fail(json, "SCHEMA_DRIFT", (err as Error).message);
+    return fail(json, "SCHEMA_DRIFT", (err as Error).message, [], write);
   }
 
   let plan: ReattachPlan;
@@ -96,7 +113,7 @@ export async function runReattach(argv: readonly string[]): Promise<number> {
     );
   } catch (err) {
     if (err instanceof ReattachValidationError) {
-      return fail(json, err.code, err.message, nextActionsFor(err.code));
+      return fail(json, err.code, err.message, nextActionsFor(err.code), write);
     }
     throw err;
   }
@@ -104,7 +121,7 @@ export async function runReattach(argv: readonly string[]): Promise<number> {
   if (plan.previousParent === plan.newParent) {
     const result: ReattachResult = { plan, committed: false };
     if (json) {
-      printEnvelope(okEnvelope("reattach", result));
+      printEnvelope(okEnvelope("reattach", result), write);
     } else {
       console.log("이미 연결되어 있습니다. 변경 사항 없음");
     }
@@ -114,7 +131,7 @@ export async function runReattach(argv: readonly string[]): Promise<number> {
   if (!values.commit) {
     const result: ReattachResult = { plan, committed: false };
     if (json) {
-      printEnvelope(okEnvelope("reattach", result));
+      printEnvelope(okEnvelope("reattach", result), write);
     } else {
       console.log(
         `${plan.targetUuid} (현재 부모: ${plan.previousParent ?? "없음"}) → ${plan.newParent}로 연결`,
@@ -138,7 +155,7 @@ export async function runReattach(argv: readonly string[]): Promise<number> {
   try {
     const { result, warnings } = await applyReattach(file, plan, target);
     if (json) {
-      printEnvelope(okEnvelope("reattach", result, warnings));
+      printEnvelope(okEnvelope("reattach", result, warnings), write);
     } else {
       console.log(
         `${plan.targetUuid} (현재 부모: ${plan.previousParent ?? "없음"}) → ${plan.newParent}로 연결`,
@@ -157,7 +174,7 @@ export async function runReattach(argv: readonly string[]): Promise<number> {
     }
     return 0;
   } catch (err) {
-    return fail(json, "FILE_NOT_WRITABLE", (err as Error).message);
+    return fail(json, "FILE_NOT_WRITABLE", (err as Error).message, [], write);
   }
 }
 
@@ -174,9 +191,10 @@ function fail(
   code: ErrorCode,
   message: string,
   nextActions: readonly string[] = [],
+  write?: (chunk: string) => void,
 ): number {
   if (json) {
-    printEnvelope(errorEnvelope("reattach", code, message, nextActions));
+    printEnvelope(errorEnvelope("reattach", code, message, nextActions), write);
   } else {
     console.error(message);
   }
@@ -315,7 +333,7 @@ async function writeReplacedFile(
  * 그래도 충돌하면 일련번호를 붙여 기존 백업을 덮어쓰지 않는다
  * (src/cli/CLAUDE.md "쓰기 규칙" 3번).
  */
-function uniqueBackupPath(filePath: string): string {
+export function uniqueBackupPath(filePath: string): string {
   const now = new Date();
   const stamp = [
     now.getFullYear(),

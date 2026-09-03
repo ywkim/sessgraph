@@ -24,11 +24,24 @@ const fixturesDir = path.join(
   "fixtures",
 );
 
-/** 콘솔 출력을 캡처하며 원래 함수를 복원한다. */
+/**
+ * console.log/error/warn을 캡처하고, `--json` 출력용 `write`는
+ * `runReattach`의 두 번째 인자로 직접 주입한다.
+ *
+ * 예전에는 여기서 전역 `process.stdout.write`도 patch했는데, `runReattach`가
+ * `await`로 실제 비동기 파일 I/O(rename) 경계를 넘는 동안 전역 patch가
+ * 살아있으면 Node v26 test runner 자신의 TAP 리포터가 stdout.write를 쓰다
+ * 깨져서 형제 테스트가 등록 자체에서 조용히 사라지는 문제가 있었다(재현:
+ * `/tmp/repro*.test.js`). 아래 `--commit`류 테스트들이 실제로 이 문제로
+ * 5개 중 2개만 등록되는 걸 확인했다. `write`를 인자로 직접 넘기면 전역
+ * 상태를 건드리지 않아 이 문제를 원천적으로 피한다
+ * (`src/cli/envelope.ts`의 `printEnvelope` 코멘트 참고).
+ */
 function captureConsole(): {
   logs: string[];
   errors: string[];
   writes: string[];
+  write: (chunk: string) => void;
   restore: () => void;
 } {
   const logs: string[] = [];
@@ -37,25 +50,18 @@ function captureConsole(): {
   const originalLog = console.log;
   const originalError = console.error;
   const originalWarn = console.warn;
-  const originalWrite = process.stdout.write.bind(process.stdout);
   console.log = (...args: unknown[]) => logs.push(args.join(" "));
   console.error = (...args: unknown[]) => errors.push(args.join(" "));
   console.warn = (...args: unknown[]) => errors.push(args.join(" "));
-  const fakeWrite = (chunk: unknown): boolean => {
-    writes.push(String(chunk));
-    return true;
-  };
-  // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion -- 테스트 전용 stub, 콜백/encoding 오버로드는 안 씀
-  process.stdout.write = fakeWrite as typeof process.stdout.write;
   return {
     logs,
     errors,
     writes,
+    write: (chunk) => writes.push(chunk),
     restore: () => {
       console.log = originalLog;
       console.error = originalError;
       console.warn = originalWarn;
-      process.stdout.write = originalWrite;
     },
   };
 }
@@ -69,15 +75,18 @@ test("runReattach: dry-run은 파일을 건드리지 않는다", async () => {
   const cap = captureConsole();
   let exitCode: number;
   try {
-    exitCode = await runReattach([
-      filePath,
-      "--uuid",
-      "00000000-0000-4000-8000-000000000003",
-      "--parent",
-      "00000000-0000-4000-8000-000000000002",
-      "--reason",
-      "테스트",
-    ]);
+    exitCode = await runReattach(
+      [
+        filePath,
+        "--uuid",
+        "00000000-0000-4000-8000-000000000003",
+        "--parent",
+        "00000000-0000-4000-8000-000000000002",
+        "--reason",
+        "테스트",
+      ],
+      cap.write,
+    );
   } finally {
     cap.restore();
   }
@@ -99,16 +108,19 @@ test("runReattach: --commit은 대상 줄의 parentUuid만 바꾸고 나머지�
   const cap = captureConsole();
   let exitCode: number;
   try {
-    exitCode = await runReattach([
-      filePath,
-      "--uuid",
-      "00000000-0000-4000-8000-000000000003",
-      "--parent",
-      "00000000-0000-4000-8000-000000000002",
-      "--reason",
-      "테스트: 끊긴 지점 연결",
-      "--commit",
-    ]);
+    exitCode = await runReattach(
+      [
+        filePath,
+        "--uuid",
+        "00000000-0000-4000-8000-000000000003",
+        "--parent",
+        "00000000-0000-4000-8000-000000000002",
+        "--reason",
+        "테스트: 끊긴 지점 연결",
+        "--commit",
+      ],
+      cap.write,
+    );
   } finally {
     cap.restore();
   }
@@ -153,13 +165,16 @@ test("runReattach: --reason 누락은 종료 코드 2", async () => {
   const cap = captureConsole();
   let exitCode: number;
   try {
-    exitCode = await runReattach([
-      filePath,
-      "--uuid",
-      "00000000-0000-4000-8000-000000000002",
-      "--parent",
-      "00000000-0000-4000-8000-000000000001",
-    ]);
+    exitCode = await runReattach(
+      [
+        filePath,
+        "--uuid",
+        "00000000-0000-4000-8000-000000000002",
+        "--parent",
+        "00000000-0000-4000-8000-000000000001",
+      ],
+      cap.write,
+    );
   } finally {
     cap.restore();
   }
@@ -177,16 +192,19 @@ test("runReattach: 순환이면 종료 코드 2이고 파일을 건드리지 않
   const cap = captureConsole();
   let exitCode: number;
   try {
-    exitCode = await runReattach([
-      filePath,
-      "--uuid",
-      "00000000-0000-4000-8000-000000000002",
-      "--parent",
-      "00000000-0000-4000-8000-000000000004",
-      "--reason",
-      "사유",
-      "--commit",
-    ]);
+    exitCode = await runReattach(
+      [
+        filePath,
+        "--uuid",
+        "00000000-0000-4000-8000-000000000002",
+        "--parent",
+        "00000000-0000-4000-8000-000000000004",
+        "--reason",
+        "사유",
+        "--commit",
+      ],
+      cap.write,
+    );
   } finally {
     cap.restore();
   }
@@ -204,17 +222,20 @@ test("runReattach: --json --commit은 봉투에 ReattachResult를 담고 stderr�
   const cap = captureConsole();
   let exitCode: number;
   try {
-    exitCode = await runReattach([
-      filePath,
-      "--uuid",
-      "00000000-0000-4000-8000-000000000003",
-      "--parent",
-      "00000000-0000-4000-8000-000000000002",
-      "--reason",
-      "테스트: --json",
-      "--commit",
-      "--json",
-    ]);
+    exitCode = await runReattach(
+      [
+        filePath,
+        "--uuid",
+        "00000000-0000-4000-8000-000000000003",
+        "--parent",
+        "00000000-0000-4000-8000-000000000002",
+        "--reason",
+        "테스트: --json",
+        "--commit",
+        "--json",
+      ],
+      cap.write,
+    );
   } finally {
     cap.restore();
   }
@@ -222,15 +243,11 @@ test("runReattach: --json --commit은 봉투에 ReattachResult를 담고 stderr�
   assert.equal(exitCode, 0);
   assert.equal(cap.logs.length, 0);
   assert.equal(cap.errors.length, 0);
+  assert.equal(cap.writes.length, 1);
 
-  // 이 테스트는 실제 파일 I/O(pipeline/rename)로 await한다 — 그 사이 node:test
-  // 리포터 자신의 TAP 출력도 process.stdout.write를 거쳐 이 캡처에 함께
-  // 걸릴 수 있다. 우리 봉투만 골라낸다 (마지막에 우리 코드가 동기로 쓴다).
-  const envelopeLine = cap.writes.findLast((w) =>
-    w.includes('"command":"reattach"'),
-  );
-  assert.ok(envelopeLine, "reattach 봉투가 stdout에 쓰여야 합니다");
-  const envelope = JSON.parse(envelopeLine) as CommandEnvelope<ReattachResult>;
+  const envelope = JSON.parse(
+    cap.writes[0]!,
+  ) as CommandEnvelope<ReattachResult>;
   assert.equal(envelope.ok, true);
   assert.equal(envelope.command, "reattach");
   assert.equal(envelope.error, null);
@@ -250,16 +267,19 @@ test("runReattach: --json dry-run은 committed: false를 담고 파일을 건드
   const cap = captureConsole();
   let exitCode: number;
   try {
-    exitCode = await runReattach([
-      filePath,
-      "--uuid",
-      "00000000-0000-4000-8000-000000000003",
-      "--parent",
-      "00000000-0000-4000-8000-000000000002",
-      "--reason",
-      "테스트: dry-run --json",
-      "--json",
-    ]);
+    exitCode = await runReattach(
+      [
+        filePath,
+        "--uuid",
+        "00000000-0000-4000-8000-000000000003",
+        "--parent",
+        "00000000-0000-4000-8000-000000000002",
+        "--reason",
+        "테스트: dry-run --json",
+        "--json",
+      ],
+      cap.write,
+    );
   } finally {
     cap.restore();
   }
@@ -283,17 +303,20 @@ test("runReattach: --json이면 순환은 CYCLE_DETECTED, nextActions는 빈 배
   const cap = captureConsole();
   let exitCode: number;
   try {
-    exitCode = await runReattach([
-      filePath,
-      "--uuid",
-      "00000000-0000-4000-8000-000000000002",
-      "--parent",
-      "00000000-0000-4000-8000-000000000004",
-      "--reason",
-      "사유",
-      "--commit",
-      "--json",
-    ]);
+    exitCode = await runReattach(
+      [
+        filePath,
+        "--uuid",
+        "00000000-0000-4000-8000-000000000002",
+        "--parent",
+        "00000000-0000-4000-8000-000000000004",
+        "--reason",
+        "사유",
+        "--commit",
+        "--json",
+      ],
+      cap.write,
+    );
   } finally {
     cap.restore();
   }
@@ -312,16 +335,19 @@ test("runReattach: --json이면 파일 없음은 FILE_NOT_FOUND", async () => {
   const cap = captureConsole();
   let exitCode: number;
   try {
-    exitCode = await runReattach([
-      "/no/such/file.jsonl",
-      "--uuid",
-      "x",
-      "--parent",
-      "y",
-      "--reason",
-      "사유",
-      "--json",
-    ]);
+    exitCode = await runReattach(
+      [
+        "/no/such/file.jsonl",
+        "--uuid",
+        "x",
+        "--parent",
+        "y",
+        "--reason",
+        "사유",
+        "--json",
+      ],
+      cap.write,
+    );
   } finally {
     cap.restore();
   }

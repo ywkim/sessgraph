@@ -14,10 +14,17 @@ const fixturesDir = path.join(
   "fixtures",
 );
 
+/**
+ * console.log/error를 캡처하고, `--json` 출력용 `write`는 `runVerify`의
+ * 두 번째 인자로 직접 주입한다 — `src/cli/envelope.ts`의 `printEnvelope`
+ * 코멘트 참고 (전역 `process.stdout.write` patch가 `await` 경계를 넘으면
+ * Node v26 test runner에서 형제 테스트가 등록에서 사라진다).
+ */
 function captureConsole(): {
   logs: string[];
   errors: string[];
   writes: string[];
+  write: (chunk: string) => void;
   restore: () => void;
 } {
   const logs: string[] = [];
@@ -25,23 +32,16 @@ function captureConsole(): {
   const writes: string[] = [];
   const originalLog = console.log;
   const originalError = console.error;
-  const originalWrite = process.stdout.write.bind(process.stdout);
   console.log = (...args: unknown[]) => logs.push(args.join(" "));
   console.error = (...args: unknown[]) => errors.push(args.join(" "));
-  const fakeWrite = (chunk: unknown): boolean => {
-    writes.push(String(chunk));
-    return true;
-  };
-  // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion -- 테스트 전용 stub
-  process.stdout.write = fakeWrite as typeof process.stdout.write;
   return {
     logs,
     errors,
     writes,
+    write: (chunk) => writes.push(chunk),
     restore: () => {
       console.log = originalLog;
       console.error = originalError;
-      process.stdout.write = originalWrite;
     },
   };
 }
@@ -50,11 +50,14 @@ test("runVerify: 진짜 세션 시작점에 연결되어 있으면 종료 코드
   const cap = captureConsole();
   let exitCode: number;
   try {
-    exitCode = runVerify([
-      path.join(fixturesDir, "minimal-chain.anon.jsonl"),
-      "--uuid",
-      "00000000-0000-4000-8000-000000000004",
-    ]);
+    exitCode = runVerify(
+      [
+        path.join(fixturesDir, "minimal-chain.anon.jsonl"),
+        "--uuid",
+        "00000000-0000-4000-8000-000000000004",
+      ],
+      cap.write,
+    );
   } finally {
     cap.restore();
   }
@@ -66,11 +69,14 @@ test("runVerify: 컴팩트 경계에서 끊긴 경우도 종료 코드 0", () =>
   const cap = captureConsole();
   let exitCode: number;
   try {
-    exitCode = runVerify([
-      path.join(fixturesDir, "compact-split.anon.jsonl"),
-      "--uuid",
-      "00000000-0000-4000-8000-000000000005",
-    ]);
+    exitCode = runVerify(
+      [
+        path.join(fixturesDir, "compact-split.anon.jsonl"),
+        "--uuid",
+        "00000000-0000-4000-8000-000000000005",
+      ],
+      cap.write,
+    );
   } finally {
     cap.restore();
   }
@@ -82,12 +88,15 @@ test("runVerify --json: 봉투에 VerifyResult가 그대로 담긴다", () => {
   const cap = captureConsole();
   let exitCode: number;
   try {
-    exitCode = runVerify([
-      path.join(fixturesDir, "compact-split.anon.jsonl"),
-      "--uuid",
-      "00000000-0000-4000-8000-000000000005",
-      "--json",
-    ]);
+    exitCode = runVerify(
+      [
+        path.join(fixturesDir, "compact-split.anon.jsonl"),
+        "--uuid",
+        "00000000-0000-4000-8000-000000000005",
+        "--json",
+      ],
+      cap.write,
+    );
   } finally {
     cap.restore();
   }
@@ -107,7 +116,7 @@ test("runVerify: 파일이 없으면 종료 코드 2", () => {
   const cap = captureConsole();
   let exitCode: number;
   try {
-    exitCode = runVerify(["없는-파일.jsonl", "--uuid", "아무거나"]);
+    exitCode = runVerify(["없는-파일.jsonl", "--uuid", "아무거나"], cap.write);
   } finally {
     cap.restore();
   }
@@ -118,12 +127,15 @@ test("runVerify --json: uuid를 찾을 수 없으면 봉투 오류", () => {
   const cap = captureConsole();
   let exitCode: number;
   try {
-    exitCode = runVerify([
-      path.join(fixturesDir, "minimal-chain.anon.jsonl"),
-      "--uuid",
-      "존재하지-않는-uuid",
-      "--json",
-    ]);
+    exitCode = runVerify(
+      [
+        path.join(fixturesDir, "minimal-chain.anon.jsonl"),
+        "--uuid",
+        "존재하지-않는-uuid",
+        "--json",
+      ],
+      cap.write,
+    );
   } finally {
     cap.restore();
   }
@@ -137,7 +149,10 @@ test("runVerify: --uuid 누락이면 종료 코드 2", () => {
   const cap = captureConsole();
   let exitCode: number;
   try {
-    exitCode = runVerify([path.join(fixturesDir, "minimal-chain.anon.jsonl")]);
+    exitCode = runVerify(
+      [path.join(fixturesDir, "minimal-chain.anon.jsonl")],
+      cap.write,
+    );
   } finally {
     cap.restore();
   }
