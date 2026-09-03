@@ -41,7 +41,8 @@ test("runSchema: 항상 종료 코드 0이고 봉투 하나를 stdout에 쓴다"
   assert.equal(envelope.result?.schemaVersion, 1);
   assert.ok(envelope.result?.commands.some((c) => c.name === "inspect"));
   assert.ok(envelope.result?.commands.some((c) => c.name === "reattach"));
-  assert.ok(!envelope.result?.commands.some((c) => c.name === "verify"));
+  assert.ok(envelope.result?.commands.some((c) => c.name === "verify"));
+  assert.ok(!envelope.result?.commands.some((c) => c.name === "revert"));
   assert.ok(envelope.result?.errorCodes.includes("CYCLE_DETECTED"));
   assert.ok(envelope.result?.warningCodes.includes("KEYS_DROPPED"));
   assert.deepEqual(
