@@ -6,7 +6,10 @@ import { buildVerifyResult, VerifyValidationError } from "../core/verify.js";
 import type { ErrorCode } from "../core/types.js";
 import { errorEnvelope, okEnvelope, printEnvelope } from "./envelope.js";
 
-export function runVerify(argv: readonly string[]): number {
+export function runVerify(
+  argv: readonly string[],
+  write?: (chunk: string) => void,
+): number {
   let values: { uuid?: string; json?: boolean };
   let positionals: string[];
   try {
@@ -23,6 +26,8 @@ export function runVerify(argv: readonly string[]): number {
       false,
       "UNKNOWN_ARGUMENT",
       `인자 파싱 실패: ${(err as Error).message}`,
+      [],
+      write,
     );
   }
 
@@ -30,13 +35,25 @@ export function runVerify(argv: readonly string[]): number {
 
   const file = positionals[0];
   if (!file) {
-    return fail(json, "MISSING_ARGUMENT", "세션 파일 경로가 필요합니다");
+    return fail(
+      json,
+      "MISSING_ARGUMENT",
+      "세션 파일 경로가 필요합니다",
+      [],
+      write,
+    );
   }
   if (!existsSync(file)) {
-    return fail(json, "FILE_NOT_FOUND", `파일을 찾을 수 없습니다: ${file}`);
+    return fail(
+      json,
+      "FILE_NOT_FOUND",
+      `파일을 찾을 수 없습니다: ${file}`,
+      [],
+      write,
+    );
   }
   if (!values.uuid) {
-    return fail(json, "MISSING_ARGUMENT", "--uuid는 필수입니다");
+    return fail(json, "MISSING_ARGUMENT", "--uuid는 필수입니다", [], write);
   }
 
   let index;
@@ -44,13 +61,13 @@ export function runVerify(argv: readonly string[]): number {
   try {
     ({ index, nodes } = buildIndexDetailed(file));
   } catch (err) {
-    return fail(json, "SCHEMA_DRIFT", (err as Error).message);
+    return fail(json, "SCHEMA_DRIFT", (err as Error).message, [], write);
   }
 
   try {
     const result = buildVerifyResult(index, nodes, values.uuid);
     if (json) {
-      printEnvelope(okEnvelope("verify", result));
+      printEnvelope(okEnvelope("verify", result), write);
     } else {
       console.log(
         `이 지점은 root ${result.segment.rootUuid}(${result.segment.rootSubtype ?? "없음"})까지 ${result.segment.nodeCount}개 노드로 연결되어 있습니다`,
@@ -69,7 +86,7 @@ export function runVerify(argv: readonly string[]): number {
     return 0;
   } catch (err) {
     if (err instanceof VerifyValidationError) {
-      return fail(json, err.code, err.message);
+      return fail(json, err.code, err.message, [], write);
     }
     throw err;
   }
@@ -80,9 +97,10 @@ function fail(
   code: ErrorCode,
   message: string,
   nextActions: readonly string[] = [],
+  write?: (chunk: string) => void,
 ): number {
   if (json) {
-    printEnvelope(errorEnvelope("verify", code, message, nextActions));
+    printEnvelope(errorEnvelope("verify", code, message, nextActions), write);
   } else {
     console.error(message);
   }

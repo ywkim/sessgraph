@@ -12,7 +12,7 @@ import {
  * 무관하게 항상 봉투를 출력한다
  * (docs/spec/20260903-1218-machine-readable-output.spec.md "schema 명령").
  */
-export function runSchema(): number {
+export function runSchema(write?: (chunk: string) => void): number {
   const schema: CliSchema = {
     tool: "sessgraph",
     schemaVersion: 1,
@@ -21,6 +21,6 @@ export function runSchema(): number {
     errorCodes: ERROR_CODES,
     warningCodes: WARNING_CODES,
   };
-  printEnvelope(okEnvelope("schema", schema));
+  printEnvelope(okEnvelope("schema", schema), write);
   return 0;
 }

@@ -4,7 +4,7 @@
  * 따로 두지 않는다
  * (docs/spec/20260903-1218-machine-readable-output.spec.md "데이터 모델").
  *
- * 아직 구현되지 않은 명령(revert, serve)은 등록하지 않는다.
+ * 아직 구현되지 않은 명령(serve)은 등록하지 않는다.
  * `schema`는 실행 가능한 명령만 광고한다 (같은 Spec "엣지 케이스").
  */
 import type {
@@ -111,6 +111,47 @@ export const COMMANDS: readonly CommandDescriptor[] = [
       },
     ],
     example: "sessgraph verify session.jsonl --uuid <uuid> --json",
+  },
+  {
+    name: "revert",
+    summary: "reattach가 남긴 백업/수술 로그를 이용해 재연결을 되돌린다",
+    writes: true,
+    positionals: [
+      { name: "file", required: true, description: "세션 JSONL 파일 경로" },
+    ],
+    options: [
+      {
+        name: "last",
+        type: "boolean",
+        required: false,
+        default: false,
+        description:
+          "가장 최근 수술 1건만 되돌린다 (--to와 동시 사용 불가, 기본값)",
+      },
+      {
+        name: "to",
+        type: "string",
+        required: false,
+        default: null,
+        description:
+          "이 시각(ISO8601, 포함) 이후에 발생한 모든 수술을 되돌린다",
+      },
+      {
+        name: "commit",
+        type: "boolean",
+        required: false,
+        default: false,
+        description: "실제로 파일을 복원한다. 없으면 dry-run",
+      },
+      {
+        name: "json",
+        type: "boolean",
+        required: false,
+        default: false,
+        description: "봉투 JSON 한 줄을 stdout에 출력",
+      },
+    ],
+    example: "sessgraph revert session.jsonl --last --commit",
   },
   {
     name: "schema",
