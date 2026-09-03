@@ -9,9 +9,11 @@
 import type {
   IndexResult,
   NodeIndex,
+  Segment,
   SegmentDetail,
   NodeBody,
 } from "../core/types.js";
+import { summarizeRaw, formatTime, escapeHtml } from "./format.js";
 
 const ROW_HEIGHT = 52; // .node 한 줄의 고정 높이 (가상 스크롤 계산 기준)
 const OVERSCAN = 5;
@@ -85,7 +87,7 @@ function renderWarnings(index: IndexResult): void {
   }
 }
 
-function renderSegment(segment: IndexResult["segments"][number]): HTMLElement {
+function renderSegment(segment: Segment): HTMLElement {
   // 끊김을 구분해 보이되 오류로 단정하지 않는다 — 컴팩트 경계는 정상
   // 동작의 결과다 (src/web/CLAUDE.md "표시 규칙").
   const isCut = segment.rootSubtype === "compact_boundary";
@@ -147,7 +149,9 @@ async function loadDetail(
   container.append(renderVirtualList(detail.nodes));
 }
 
-function renderReattach(detail: SegmentDetail): HTMLElement {
+function renderReattach(
+  detail: SegmentDetail & { suggestedReattachCommand: string },
+): HTMLElement {
   const box = document.createElement("div");
   box.className = "reattach";
 
@@ -163,7 +167,7 @@ function renderReattach(detail: SegmentDetail): HTMLElement {
   }
   box.append(label);
 
-  const command = detail.suggestedReattachCommand!;
+  const command = detail.suggestedReattachCommand;
   const code = document.createElement("code");
   code.textContent = command;
   box.append(code);
@@ -270,34 +274,6 @@ function renderNode(node: NodeIndex, position: number): HTMLElement {
   return el;
 }
 
-/**
- * 본문 한 줄에서 사람이 읽을 부분만 뽑는다. 그래프 구조를 다시 계산하지는
- * 않는다 — 여기서 파싱하는 것은 표시용 텍스트뿐이다.
- */
-function summarizeRaw(raw: string): string {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(raw);
-  } catch {
-    return raw.slice(0, 300);
-  }
-  const content = (parsed as { message?: { content?: unknown } })?.message
-    ?.content;
-  if (typeof content === "string") return content;
-  if (Array.isArray(content)) {
-    return (content as { type?: string; text?: string; name?: string }[])
-      .map((part) => {
-        if (part?.type === "text") return part.text ?? "";
-        if (part?.type === "tool_use") return `[도구 ${part.name}]`;
-        if (part?.type === "tool_result") return "[도구 결과]";
-        return `[${part?.type ?? "?"}]`;
-      })
-      .join(" ")
-      .slice(0, 300);
-  }
-  return raw.slice(0, 300);
-}
-
 function showBanner(message: string): void {
   bannerEl.textContent = message;
   bannerEl.hidden = false;
@@ -321,25 +297,4 @@ async function getJson<T>(url: string): Promise<T> {
     );
   }
   return (await res.json()) as T;
-}
-
-function formatTime(timestamp: string | null): string {
-  if (!timestamp) return "";
-  return timestamp.replace("T", " ").slice(0, 19);
-}
-
-function escapeHtml(value: unknown): string {
-  return String(value).replace(
-    /[&<>"']/g,
-    (c) =>
-      (
-        ({
-          "&": "&amp;",
-          "<": "&lt;",
-          ">": "&gt;",
-          '"': "&quot;",
-          "'": "&#39;",
-        }) as Record<string, string>
-      )[c]!,
-  );
 }
