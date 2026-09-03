@@ -6,7 +6,6 @@ import {
   copyFileSync,
   mkdtempSync,
   readFileSync,
-  statSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -14,7 +13,12 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { buildIndexDetailed } from "../core/build-index.js";
-import { createRequestHandler, runServe } from "./serve.js";
+import {
+  createRequestHandler,
+  isStale,
+  runServe,
+  snapshotOf,
+} from "./serve.js";
 import type { IndexResult, NodeBody, SegmentDetail } from "../core/types.js";
 
 const fixturesDir = path.join(
@@ -41,9 +45,8 @@ async function withServer(
   const file = path.join(dir, "session.jsonl");
   copyFileSync(path.join(fixturesDir, `${fixture}.anon.jsonl`), file);
 
+  const snapshot = snapshotOf(file);
   const { index, nodes } = buildIndexDetailed(file);
-  const stat = statSync(file);
-  const snapshot = { ino: stat.ino, size: stat.size, mtimeMs: stat.mtimeMs };
   const server: Server = createServer(
     createRequestHandler(file, index, nodes, snapshot),
   );
@@ -137,6 +140,23 @@ test("serve: 기동 후 원본이 바뀌면 /api/segment/:root도 409", async ()
     const res = await fetch(`${base}/api/segment/${U(3)}`);
     assert.equal(res.status, 409);
   });
+});
+
+test("isStale: size·mtime이 같아도 inode가 다르면 stale이다", () => {
+  // size/mtimeMs 축을 일부러 동일하게 둬 ino 비교가 실제로 결과를
+  // 좌우하는지 검증한다 (2026-09-03 리뷰). 실제 파일에서 이 세 축을
+  // 독립적으로 재현하려 하면 파일시스템의 타임스탬프 정밀도 한계(예:
+  // `utimesSync`가 밀리초 미만을 못 담는 것)에 부딪히므로, 순수 함수를
+  // 직접 값 비교로 검증한다.
+  const baseline = { ino: 1, size: 100, mtimeMs: 1_000 };
+  const current = { ino: 2, size: 100, mtimeMs: 1_000 };
+  assert.equal(isStale(current, baseline), true);
+});
+
+test("isStale: 세 값이 모두 같으면 stale이 아니다", () => {
+  const baseline = { ino: 1, size: 100, mtimeMs: 1_000 };
+  const current = { ino: 1, size: 100, mtimeMs: 1_000 };
+  assert.equal(isStale(current, baseline), false);
 });
 
 test("serve: 쓰기 메서드는 어떤 경로에서도 405 (ADR-0003)", async () => {

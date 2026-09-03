@@ -33,27 +33,44 @@ export type FileSnapshot = {
   readonly mtimeMs: number;
 };
 
+/** 파일을 stat해 지문을 뜬다. */
+export function snapshotOf(filePath: string): FileSnapshot {
+  const stat = statSync(filePath);
+  return { ino: stat.ino, size: stat.size, mtimeMs: stat.mtimeMs };
+}
+
 /**
- * 상주 인덱스가 지금 파일 상태와 여전히 맞는지 검사한다.
+ * 두 지문을 비교해 baseline이 낡았는지 판정하는 순수 함수.
  *
  * `size`나 `mtime`(초 단위) 단독으로는 놓치는 변경이 실측으로 확인됐다 —
  * 같은 길이 문자열로 치환하는 `reattach`(uuid→uuid)는 size가 그대로고,
  * `reattach`/`revert`는 temp+rename이라 매번 새 inode를 받지만 제3의
  * 도구가 in-place로 고치면 ino는 유지된 채 mtime만 바뀔 수 있다.
- * `{ino, size, mtimeMs}` 세 값을 모두 비교해야 두 경로 다 잡힌다.
+ * `{ino, size, mtimeMs}` 세 값을 모두 비교해야 두 경로 다 잡힌다. 값
+ * 비교만 하는 순수 함수로 둔 이유는, 실제 파일에서 이 세 축을 독립적으로
+ * 재현하려 하면 파일시스템의 타임스탬프 정밀도 한계(예: `utimesSync`가
+ * 밀리초 미만을 못 담는 것)에 부딪히기 때문이다 — 축별 회귀 테스트는
+ * 이 함수를 직접 호출해 검증한다.
  */
-function isStale(filePath: string, baseline: FileSnapshot): boolean {
-  let current: ReturnType<typeof statSync>;
-  try {
-    current = statSync(filePath);
-  } catch {
-    return true; // 파일이 사라졌다면 당연히 stale이다
-  }
+export function isStale(
+  current: FileSnapshot,
+  baseline: FileSnapshot,
+): boolean {
   return (
     current.ino !== baseline.ino ||
     current.size !== baseline.size ||
     current.mtimeMs !== baseline.mtimeMs
   );
+}
+
+function currentlyStale(filePath: string, baseline: FileSnapshot): boolean {
+  let current: FileSnapshot;
+  try {
+    current = snapshotOf(filePath);
+  } catch {
+    return true; // 파일이 사라졌다면 당연히 stale이다
+  }
+  return isStale(current, baseline);
 }
 
 /**
@@ -93,7 +110,7 @@ export function createRequestHandler(
       url.pathname === "/api/index" ||
       url.pathname.startsWith("/api/segment/")
     ) {
-      if (isStale(filePath, snapshot)) {
+      if (currentlyStale(filePath, snapshot)) {
         sendJson(res, 409, {
           error: "파일이 변경되었습니다. 서버를 재시작하세요",
         });
@@ -247,6 +264,14 @@ export function runServe(
     }
   }
 
+  // 스냅샷은 인덱싱 시작 전에 찍는다. 인덱싱 자체가 파일을 순차로 읽는 데
+  // 시간이 걸리므로(실측 대용량 파일 기준 최대 1초대), 인덱싱 도중 파일이
+  // 바뀌면 스냅샷을 인덱싱 뒤에 찍을 경우 그 변경 이후 상태를 baseline으로
+  // 잘못 기록해 이후 isStale()이 영원히 "안 바뀜"으로 오판한다(2026-09-03
+  // 리뷰에서 지적). 먼저 찍으면 그 구간의 변경도 baseline과의 불일치로
+  // 정확히 잡힌다.
+  const snapshot = snapshotOf(file);
+
   let index: IndexResult;
   let nodes: ReadonlyMap<string, NodeIndex>;
   try {
@@ -256,12 +281,6 @@ export function runServe(
     logError((err as Error).message);
     return Promise.resolve(2);
   }
-  const stat = statSync(file);
-  const snapshot: FileSnapshot = {
-    ino: stat.ino,
-    size: stat.size,
-    mtimeMs: stat.mtimeMs,
-  };
 
   const server = createServer(
     createRequestHandler(file, index, nodes, snapshot),
