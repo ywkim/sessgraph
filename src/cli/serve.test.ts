@@ -2,13 +2,23 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import type { Server } from "node:http";
-import { copyFileSync, mkdtempSync, writeFileSync } from "node:fs";
+import {
+  copyFileSync,
+  mkdtempSync,
+  readFileSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { buildIndexDetailed } from "../core/build-index.js";
-import { createRequestHandler, runServe } from "./serve.js";
+import {
+  createRequestHandler,
+  isStale,
+  loadIndexState,
+  runServe,
+} from "./serve.js";
 import type { IndexResult, NodeBody, SegmentDetail } from "../core/types.js";
 
 const fixturesDir = path.join(
@@ -35,8 +45,8 @@ async function withServer(
   const file = path.join(dir, "session.jsonl");
   copyFileSync(path.join(fixturesDir, `${fixture}.anon.jsonl`), file);
 
-  const { index, nodes } = buildIndexDetailed(file);
-  const server: Server = createServer(createRequestHandler(file, index, nodes));
+  const initial = loadIndexState(file);
+  const server: Server = createServer(createRequestHandler(file, initial));
   await new Promise<void>((resolve) =>
     server.listen(0, "127.0.0.1", () => resolve()),
   );
@@ -101,14 +111,97 @@ test("serve: 인덱스에 없는 uuid는 404", async () => {
   });
 });
 
-test("serve: 기동 후 원본이 바뀌면 /api/body는 409로 알린다", async () => {
+test("serve: 기동 후 원본이 통째로 바뀌면 /api/body는 새 인덱스 기준으로 404를 낸다", async () => {
   await withServer("compact-split", async (base, file) => {
-    // 첫 줄을 길이가 다른 내용으로 갈아엎어 byteOffset을 어긋나게 만든다.
-    writeFileSync(file, `{"uuid":"x","parentUuid":null}\n`);
+    // 파일을 완전히 다른(하지만 유효한) 세션으로 갈아엎는다. 낡은 인덱스
+    // 기준으로 존재하던 uuid가 재인덱싱 후에는 없으므로, 엉뚱한 본문을
+    // 돌려주는 대신 "찾을 수 없음"이 정확한 답이다.
+    writeFileSync(
+      file,
+      `{"uuid":"x","parentUuid":null,"type":"user","timestamp":"2026-01-01T00:00:00.000Z"}\n`,
+    );
     const res = await fetch(`${base}/api/body?uuid=${U(4)}`);
-    assert.equal(res.status, 409);
+    assert.equal(res.status, 404);
+  });
+});
+
+test("serve: reattach로 원본이 바뀌면 /api/index가 재인덱싱된 최신 구조를 200으로 돌려준다", async () => {
+  await withServer("compact-split", async (base, file) => {
+    const beforeRes = await fetch(`${base}/api/index`);
+    assert.equal(beforeRes.status, 200);
+    const before = (await beforeRes.json()) as IndexResult;
+    assert.equal(before.segments.length, 2);
+
+    // 세 번째 노드(끊김 지점)를 첫 번째 노드에 실제로 재연결한다 —
+    // `reattach` CLI가 하는 것과 같은 변경(부모 필드만 교체). 재연결 결과
+    // 두 조각이 하나로 합쳐진다.
+    writeFileSync(
+      file,
+      readFileSync(file, "utf8").replace(
+        `"uuid":"${U(3)}","parentUuid":null`,
+        `"uuid":"${U(3)}","parentUuid":"${U(1)}"`,
+      ),
+    );
+
+    const afterRes = await fetch(`${base}/api/index`);
+    assert.equal(afterRes.status, 200, "409로 막히지 않고 재인덱싱되어야 함");
+    const after = (await afterRes.json()) as IndexResult;
+    assert.equal(after.segments.length, 1);
+  });
+});
+
+test("serve: reattach로 원본이 바뀌면 낡은 세그먼트 root는 /api/segment에서 404가 된다", async () => {
+  await withServer("compact-split", async (base, file) => {
+    const before = await fetch(`${base}/api/segment/${U(3)}`);
+    assert.equal(before.status, 200);
+
+    writeFileSync(
+      file,
+      readFileSync(file, "utf8").replace(
+        `"uuid":"${U(3)}","parentUuid":null`,
+        `"uuid":"${U(3)}","parentUuid":"${U(1)}"`,
+      ),
+    );
+
+    // U(3)은 재연결로 더 이상 세그먼트 root가 아니다 — 재인덱싱된
+    // 최신 구조 기준으로 정확히 404여야 한다("낡은 200"이 아니라).
+    const after = await fetch(`${base}/api/segment/${U(3)}`);
+    assert.equal(after.status, 404);
+  });
+});
+
+test("isStale: size·mtime이 같아도 inode가 다르면 stale이다", () => {
+  // size/mtimeMs 축을 일부러 동일하게 둬 ino 비교가 실제로 결과를
+  // 좌우하는지 검증한다 (2026-09-03 리뷰). 실제 파일에서 이 세 축을
+  // 독립적으로 재현하려 하면 파일시스템의 타임스탬프 정밀도 한계(예:
+  // `utimesSync`가 밀리초 미만을 못 담는 것)에 부딪히므로, 순수 함수를
+  // 직접 값 비교로 검증한다.
+  const baseline = { ino: 1, size: 100, mtimeMs: 1_000 };
+  const current = { ino: 2, size: 100, mtimeMs: 1_000 };
+  assert.equal(isStale(current, baseline), true);
+});
+
+test("isStale: 세 값이 모두 같으면 stale이 아니다", () => {
+  const baseline = { ino: 1, size: 100, mtimeMs: 1_000 };
+  const current = { ino: 1, size: 100, mtimeMs: 1_000 };
+  assert.equal(isStale(current, baseline), false);
+});
+
+test("serve: 재인덱싱이 ADR-0004 불변식 위반으로 실패하면 낡은 인덱스로 폴백하지 않고 500", async () => {
+  await withServer("compact-split", async (base, file) => {
+    // parentUuid 필드를 통째로 제거한 내용으로 갈아엎는다 — buildIndexDetailed가
+    // throw하는 불변식 위반(ADR-0004)을 요청 처리 도중 재현한다.
+    writeFileSync(
+      file,
+      readFileSync(
+        path.join(fixturesDir, "no-parent-field.anon.jsonl"),
+        "utf8",
+      ),
+    );
+    const res = await fetch(`${base}/api/index`);
+    assert.equal(res.status, 500);
     const payload = (await res.json()) as { error: string };
-    assert.match(payload.error, /파일이 변경되었습니다|본문을 읽지 못했습니다/);
+    assert.match(payload.error, /parentUuid 필드가 전혀 없습니다/);
   });
 });
 
