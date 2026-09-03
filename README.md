@@ -41,7 +41,10 @@ sessgraph serve <file>       # 읽기 전용 웹 뷰어
 sessgraph reattach <file> --uuid X --parent Y --reason "..."
 sessgraph verify <file>      # leaf → root 역추적 길이
 sessgraph revert <file>      # 백업 복원
+sessgraph schema             # 명령·플래그·오류 코드를 기계 판독 형태로 출력
 ```
+
+`schema`를 뺀 모든 명령은 `--json`으로 기계 판독 출력을 낼 수 있습니다 ([규약](docs/spec/20260903-1218-machine-readable-output.spec.md)). `schema`는 항상 기계 판독입니다.
 
 ## ⚠️ 주의
 
