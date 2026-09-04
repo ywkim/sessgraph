@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { closeSync, existsSync, openSync, readSync, statSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { createServer } from "node:http";
@@ -8,7 +9,12 @@ import { parseArgs } from "node:util";
 
 import { buildIndexDetailed } from "../core/build-index.js";
 import { buildSegmentDetail } from "../core/serve.js";
-import type { IndexResult, NodeIndex, NodeBody } from "../core/types.js";
+import type {
+  IndexResult,
+  NodeIndex,
+  NodeBody,
+  SessionSummary,
+} from "../core/types.js";
 
 /** Spec "Interface" — 지정 포트가 사용 중이어도 다른 포트를 고르지 않는다. */
 export const DEFAULT_PORT = 7377;
@@ -96,51 +102,109 @@ export function loadIndexState(filePath: string): IndexState {
 }
 
 /**
- * 요청 시점 파일이 `holder`의 baseline과 다르면 다시 인덱싱해 교체한다.
+ * 세션 id를 절대경로에서 파생한다 — 파일명(basename)이 아니라 경로
+ * 전체를 해시한다. Claude Code 세션 저장 구조상 basename이 uuid처럼
+ * 보이지만, 이 도구가 받는 파일은 그 구조에 한정되지 않는다 —
+ * `reattach`가 만드는 `{file}.bak.{시각}` 백업이나 사용자가 복사해 둔
+ * 사본은 서로 다른 디렉터리에서 같은 파일명을 가질 수 있다. id가
+ * 충돌하면 서로 다른 세션이 조용히 섞인다
+ * (docs/design/20260905-0641-multi-session-serve.tdd.md).
+ */
+export function sessionIdOf(filePath: string): string {
+  return createHash("sha256")
+    .update(path.resolve(filePath))
+    .digest("hex")
+    .slice(0, 12);
+}
+
+/** 화면에 보여줄 이름. 조회에는 쓰지 않으므로 중복되어도 안전하다. */
+function labelOf(filePath: string): string {
+  const resolved = path.resolve(filePath);
+  const parent = path.basename(path.dirname(resolved));
+  return path.join(parent, path.basename(resolved));
+}
+
+/** 세션 하나의 상태 — 등록되었지만 아직 안 읽었거나, 읽었거나, 실패했다. */
+type SessionEntry = {
+  readonly id: string;
+  readonly label: string;
+  readonly filePath: string;
+  state: IndexState | null;
+  failure: string | null;
+};
+
+/** 존재하는 경로만 등록한다. 등록 시점에 존재 여부를 확정하고, 내용은 읽지 않는다. */
+export function registerSessions(
+  filePaths: readonly string[],
+): Map<string, SessionEntry> {
+  const registry = new Map<string, SessionEntry>();
+  for (const filePath of filePaths) {
+    const id = sessionIdOf(filePath);
+    const label = labelOf(filePath);
+    const exists = existsSync(filePath);
+    registry.set(id, {
+      id,
+      label,
+      filePath,
+      state: null,
+      failure: exists ? null : `파일을 찾을 수 없습니다: ${filePath}`,
+    });
+  }
+  return registry;
+}
+
+function summaryOf(entry: SessionEntry): SessionSummary {
+  return {
+    id: entry.id,
+    label: entry.label,
+    status:
+      entry.failure !== null ? "failed" : entry.state ? "ready" : "unread",
+    failure: entry.failure,
+  };
+}
+
+/**
+ * 요청 시점 세션 상태가 없거나 낡았으면 (다시) 인덱싱해 교체한다.
  *
  * `buildIndexDetailed`는 동기 함수라 Node의 단일 스레드 이벤트 루프 안에서
- * 한 요청의 재인덱싱이 끝나기 전까지 다른 요청이 끼어들 수 없다 — 별도의
- * in-flight 잠금 없이도 중복 재인덱싱이 생기지 않는다.
+ * 한 요청의 (재)인덱싱이 끝나기 전까지 다른 요청이 끼어들 수 없다 — 별도의
+ * in-flight 잠금 없이도 중복 인덱싱이 생기지 않는다. 세션이 여럿이면 이
+ * 성질은 동시에 "한 세션의 인덱싱이 다른 세션 요청을 그 시간만큼 막는다"는
+ * 결과로도 나타난다 — 혼자 쓰는 도구이고 실측 1초대~2.14초라 지금은
+ * 감수한다 (docs/design/20260905-0641-multi-session-serve.tdd.md).
  *
- * 재인덱싱이 실패하면(ADR-0004 불변식 위반 등) `holder`는 갱신하지 않고
- * 실패를 그대로 알린다. 낡은 인덱스로 조용히 폴백하지 않는다 — "깨진
- * 인덱스로 화면을 그리지 않는다"는 기동 시 원칙을 실행 중에도 지킨다.
- * 다음 요청이 오면 다시 재인덱싱을 시도한다(baseline이 그대로라 stale
- * 판정도 그대로 유지되므로).
+ * 실패하면 `entry.failure`에 사유를 남기고 `state`는 갱신하지 않는다 —
+ * 낡은 인덱스로 조용히 폴백하지 않는다는 원칙은 세션이 여럿이어도 그대로
+ * 유지하되, 그 실패의 범위는 이 세션 하나로 국한한다.
  */
-function refreshIfStale(
-  filePath: string,
-  holder: { current: IndexState },
+function ensureFresh(
+  entry: SessionEntry,
 ): { readonly state: IndexState } | { readonly error: string } {
-  if (!currentlyStale(filePath, holder.current.snapshot)) {
-    return { state: holder.current };
+  if (entry.state && !currentlyStale(entry.filePath, entry.state.snapshot)) {
+    return { state: entry.state };
   }
   try {
-    holder.current = loadIndexState(filePath);
-    return { state: holder.current };
+    entry.state = loadIndexState(entry.filePath);
+    entry.failure = null;
+    return { state: entry.state };
   } catch (err) {
-    return { error: (err as Error).message };
+    const message = (err as Error).message;
+    entry.failure = message;
+    return { error: message };
   }
 }
 
 /**
- * 상주 인덱스 위에서 동작하는 읽기 전용 요청 핸들러를 만든다.
+ * 여러 세션 위에서 동작하는 읽기 전용 요청 핸들러를 만든다.
  *
- * 인덱스는 기본적으로 상주시킨다 — 매 요청 무조건 재인덱싱하면 실측
- * 대용량 파일 기준 최대 1초대 비용을 매번 치르게 된다(Design "고려한
- * 대안" 대안2가 요청마다 재인덱싱을 기각한 이유와 같다). 다만 기동 후
- * 원본이 바뀌면(`reattach`/`revert`의 temp+rename뿐 아니라, 세션이
- * 진행 중이라 계속 append되는 경우도 포함) 낡은 구조를 계속 200으로
- * 내보내는 대신, **그 요청에 한해** `refreshIfStale`로 다시 인덱싱해
- * 최신 상태로 응답한다. 본문은 여전히 상주시키지 않고
- * `byteOffset`으로 그때 seek해서 읽는다.
+ * 세션 축은 경로 세그먼트(`/api/session/:id/...`)로 표현한다 — 조회
+ * 문자열에 기본값을 두면 축을 빠뜨린 요청이 임의의 세션으로 조용히
+ * 넘어갈 수 있다. 경로에 넣으면 누락은 문법적으로 무효(404)가 된다
+ * (docs/design/20260905-0641-multi-session-serve.tdd.md 대안5).
  */
 export function createRequestHandler(
-  filePath: string,
-  initial: IndexState,
+  registry: Map<string, SessionEntry>,
 ): (req: IncomingMessage, res: ServerResponse) => void {
-  const holder = { current: initial };
-
   return (req, res) => {
     // ADR-0003: 쓰기 API를 갖지 않는다. 경로 존재 여부와 무관하게 405다 —
     // 어떤 경로가 쓰기를 받는지 탐색당하지 않기 위해서다.
@@ -152,35 +216,42 @@ export function createRequestHandler(
     }
 
     const url = new URL(req.url ?? "/", "http://127.0.0.1");
-    const isApiRoute =
-      url.pathname === "/api/index" ||
-      url.pathname.startsWith("/api/segment/") ||
-      url.pathname === "/api/body";
 
-    if (!isApiRoute) {
+    if (url.pathname === "/api/sessions") {
+      sendJson(res, 200, [...registry.values()].map(summaryOf));
+      return;
+    }
+
+    const sessionMatch = /^\/api\/session\/([^/]+)(\/.*)$/.exec(url.pathname);
+    if (!sessionMatch) {
       void serveStatic(url.pathname, res);
       return;
     }
 
-    const refreshed = refreshIfStale(filePath, holder);
-    if ("error" in refreshed) {
+    const [, id, rest] = sessionMatch;
+    const entry = registry.get(id!);
+    if (!entry) {
+      sendJson(res, 404, { error: `세션을 찾을 수 없습니다: ${id}` });
+      return;
+    }
+
+    const fresh = ensureFresh(entry);
+    if ("error" in fresh) {
       sendJson(res, 500, {
-        error: `파일이 바뀌어 다시 인덱싱했지만 실패했습니다: ${refreshed.error}`,
+        error: `파일이 바뀌어 다시 인덱싱했지만 실패했습니다: ${fresh.error}`,
       });
       return;
     }
-    const { index, nodes } = refreshed.state;
+    const { index, nodes } = fresh.state;
 
-    if (url.pathname === "/api/index") {
+    if (rest === "/index") {
       sendJson(res, 200, index);
       return;
     }
 
-    if (url.pathname.startsWith("/api/segment/")) {
-      const rootUuid = decodeURIComponent(
-        url.pathname.slice("/api/segment/".length),
-      );
-      const detail = buildSegmentDetail(index, nodes, filePath, rootUuid);
+    if (rest!.startsWith("/segment/")) {
+      const rootUuid = decodeURIComponent(rest!.slice("/segment/".length));
+      const detail = buildSegmentDetail(index, nodes, entry.filePath, rootUuid);
       if (!detail) {
         sendJson(res, 404, {
           error: `세그먼트를 찾을 수 없습니다: ${rootUuid}`,
@@ -191,33 +262,37 @@ export function createRequestHandler(
       return;
     }
 
-    // url.pathname === "/api/body"
-    const uuid = url.searchParams.get("uuid");
-    const node = uuid ? nodes.get(uuid) : undefined;
-    if (!uuid || !node) {
-      sendJson(res, 404, { error: `노드를 찾을 수 없습니다: ${uuid ?? ""}` });
+    if (rest === "/body") {
+      const uuid = url.searchParams.get("uuid");
+      const node = uuid ? nodes.get(uuid) : undefined;
+      if (!uuid || !node) {
+        sendJson(res, 404, { error: `노드를 찾을 수 없습니다: ${uuid ?? ""}` });
+        return;
+      }
+      let raw: string;
+      try {
+        raw = readLineAt(entry.filePath, node.byteOffset, node.byteLength);
+      } catch (err) {
+        sendJson(res, 409, {
+          error: `본문을 읽지 못했습니다: ${(err as Error).message}`,
+        });
+        return;
+      }
+      // 위 ensureFresh가 대부분의 어긋남을 이미 재인덱싱으로 해소하지만,
+      // 요청 처리 도중(재인덱싱 이후 seek 이전) 파일이 또 바뀌는 좁은 창은
+      // 여전히 남는다. uuid 불일치는 그 마지막 방어선이다 (Spec "엣지 케이스").
+      if (!rawMatchesUuid(raw, uuid)) {
+        sendJson(res, 409, {
+          error: "파일이 변경되었습니다. 잠시 후 다시 시도하세요",
+        });
+        return;
+      }
+      const body: NodeBody = { uuid, raw };
+      sendJson(res, 200, body);
       return;
     }
-    let raw: string;
-    try {
-      raw = readLineAt(filePath, node.byteOffset, node.byteLength);
-    } catch (err) {
-      sendJson(res, 409, {
-        error: `본문을 읽지 못했습니다: ${(err as Error).message}`,
-      });
-      return;
-    }
-    // 위 refreshIfStale이 대부분의 어긋남을 이미 재인덱싱으로 해소하지만,
-    // 요청 처리 도중(재인덱싱 이후 seek 이전) 파일이 또 바뀌는 좁은 창은
-    // 여전히 남는다. uuid 불일치는 그 마지막 방어선이다 (Spec "엣지 케이스").
-    if (!rawMatchesUuid(raw, uuid)) {
-      sendJson(res, 409, {
-        error: "파일이 변경되었습니다. 잠시 후 다시 시도하세요",
-      });
-      return;
-    }
-    const body: NodeBody = { uuid, raw };
-    sendJson(res, 200, body);
+
+    sendJson(res, 404, { error: "찾을 수 없습니다" });
   };
 }
 
@@ -271,8 +346,8 @@ function rawMatchesUuid(raw: string, uuid: string): boolean {
 }
 
 /**
- * `sessgraph serve <file> [--port n]` — 127.0.0.1에만 바인딩하는 읽기 전용
- * 뷰어 서버를 기동하고 포그라운드에 머무른다
+ * `sessgraph serve <file...> [--port n]` — 127.0.0.1에만 바인딩하는
+ * 읽기 전용 뷰어 서버를 기동하고 포그라운드에 머무른다
  * (docs/spec/20260902-0420-serve-command.spec.md).
  *
  * 반환하는 Promise는 서버가 닫힐 때(SIGINT) 종료 코드로 resolve한다.
@@ -295,13 +370,9 @@ export function runServe(
     return Promise.resolve(2);
   }
 
-  const file = positionals[0];
-  if (!file) {
+  const files = positionals;
+  if (files.length === 0) {
     logError("세션 파일 경로가 필요합니다");
-    return Promise.resolve(2);
-  }
-  if (!existsSync(file)) {
-    logError(`파일을 찾을 수 없습니다: ${file}`);
     return Promise.resolve(2);
   }
 
@@ -314,16 +385,16 @@ export function runServe(
     }
   }
 
-  let initial: IndexState;
-  try {
-    initial = loadIndexState(file);
-  } catch (err) {
-    // 깨진 인덱스로 화면을 그리지 않는다 (ADR-0004).
-    logError((err as Error).message);
+  const registry = registerSessions(files);
+  const failed = [...registry.values()].filter((e) => e.failure);
+  // 보여줄 수 있는 세션이 하나도 없으면 기동하지 않는다. 일부만 없으면
+  // 기동하고 나머지는 그대로 보여준다 (Design "아키텍처").
+  if (failed.length === registry.size) {
+    logError(failed[0]!.failure!);
     return Promise.resolve(2);
   }
 
-  const server = createServer(createRequestHandler(file, initial));
+  const server = createServer(createRequestHandler(registry));
 
   return new Promise<number>((resolve) => {
     server.on("error", (err: NodeJS.ErrnoException) => {
@@ -342,9 +413,7 @@ export function runServe(
       const boundPort =
         typeof actual === "object" && actual ? actual.port : port;
       log(`http://127.0.0.1:${boundPort}`);
-      log(
-        `조각 ${initial.index.segments.length}개 · 노드 ${initial.index.nodeCount}개 · Ctrl-C로 종료`,
-      );
+      log(`세션 ${registry.size}개 등록됨 · Ctrl-C로 종료`);
     });
 
     const shutdown = () => {

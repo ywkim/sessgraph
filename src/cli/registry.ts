@@ -158,7 +158,13 @@ export const COMMANDS: readonly CommandDescriptor[] = [
     summary: "127.0.0.1에 읽기 전용 뷰어 서버를 띄워 조각 타임라인을 본다",
     writes: false,
     positionals: [
-      { name: "file", required: true, description: "세션 JSONL 파일 경로" },
+      {
+        name: "file",
+        required: true,
+        description:
+          "세션 JSONL 파일 경로. 하나 이상 지정할 수 있다 — 둘 이상이면 화면이 세션 목록을 먼저 보여준다",
+        variadic: true,
+      },
     ],
     options: [
       {
