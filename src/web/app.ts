@@ -15,7 +15,11 @@ import type {
 } from "../core/types.js";
 import { summarizeRaw, formatTime, escapeHtml } from "./format.js";
 
-const ROW_HEIGHT = 52; // .node 한 줄의 고정 높이 (가상 스크롤 계산 기준)
+// .node 한 줄의 고정 높이 (가상 스크롤 계산 기준). app.css의 --row-height와
+// 값이 같아야 한다 — 행 높이를 콘텐츠·폭과 무관한 상수로 고정하는 것이
+// docs/design/20260904-1130-responsive-layout.tdd.md의 핵심 결정이라,
+// 재계산이 필요 없어 여기서는 리터럴로 둔다.
+const ROW_HEIGHT = 52;
 const OVERSCAN = 5;
 
 const summaryEl = document.getElementById("summary")!;
