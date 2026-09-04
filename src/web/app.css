@@ -6,6 +6,27 @@
   --panel: #fff;
   --cut: #b8531f;
   --warn: #8a6d00;
+
+  /* 간격 — 8pt 그리드. 리터럴 px 대신 이 토큰을 쓴다
+     (docs/design/20260904-1130-responsive-layout.tdd.md). */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-6: 24px;
+
+  --font-meta: clamp(11px, 2.8vw, 12px);
+  --content-max: 900px;
+
+  /* 가상 스크롤 행 높이. src/web/app.ts의 ROW_HEIGHT와 값이 같아야 한다 —
+     행 높이를 콘텐츠·폭과 무관한 상수로 고정하는 것이 이 설계의 핵심이라
+     (위 문서 "행 높이 불변"), 재계산이 필요 없어 JS는 리터럴로 둔다. */
+  --row-height: 52px;
+
+  /* 좁은 컨테이너에서 .viewport 컨테이너 쿼리가 재정의한다. */
+  --node-body-indent: 80px;
+  --uuid-max-width: none;
+  --viewport-height: 420px;
 }
 
 * {
@@ -25,7 +46,7 @@ body {
 }
 
 header {
-  max-width: 900px;
+  max-width: var(--content-max);
   margin: 0 auto 16px;
 }
 
@@ -43,7 +64,7 @@ h1 {
 #banner,
 #warnings,
 #timeline {
-  max-width: 900px;
+  max-width: var(--content-max);
   margin: 0 auto;
 }
 
@@ -130,7 +151,30 @@ h1 {
 
 .uuid {
   font-family: ui-monospace, SFMono-Regular, monospace;
-  font-size: 12px;
+  font-size: var(--font-meta);
+}
+
+/* .node-head는 .node의 고정 높이(--row-height) 안에 들어가야 한다 — uuid가
+   감기면 .node-head가 그 높이를 넘어 다음 요소와 겹친다(위 문서 Context에서
+   실측한 원인). .segment-head는 높이 제약이 없는 일반 블록이라 uuid가
+   여러 줄로 감겨도 안전하며, 거기서는 원래 동작(줄바꿈)을 그대로 둔다. */
+.node-head .grow {
+  min-width: 0;
+}
+
+.node-head .uuid {
+  max-width: var(--uuid-max-width);
+  overflow-x: auto;
+  overflow-y: hidden;
+  white-space: nowrap;
+  /* 자르지 않고 가로 스크롤한다 — 정보 손실 없이 "전체 값을 확인할 방법"을
+     그대로 제공한다(PRD 성공 기준). ellipsis+title은 터치 기기에서 hover가
+     없어 이 요구를 만족하지 못한다. */
+  scrollbar-width: none;
+}
+
+.node-head .uuid::-webkit-scrollbar {
+  display: none;
 }
 
 .segment-body {
@@ -167,13 +211,26 @@ button.copy {
   font-size: 12px;
 }
 
-/* 가상 스크롤 뷰포트 — 화면에 보이는 노드만 DOM에 올린다. */
+/* 가상 스크롤 뷰포트 — 화면에 보이는 노드만 DOM에 올린다.
+   container-type을 걸어 .node의 반응 기준을 뷰포트 폭이 아니라 이 상자
+   자신의 폭으로 삼는다 — 좁은 패널 안에 놓여도 같은 규칙이 적용된다
+   (docs/design/20260904-1130-responsive-layout.tdd.md "대안4"). */
 .viewport {
-  height: 420px;
+  container-type: inline-size;
+  container-name: node-list;
+  height: var(--viewport-height);
   overflow-y: auto;
   border: 1px solid var(--line);
   border-radius: 6px;
   background: var(--panel);
+}
+
+@container node-list (max-width: 480px) {
+  .viewport {
+    --node-body-indent: 0px;
+    --uuid-max-width: 40vw;
+    --viewport-height: 60vh;
+  }
 }
 
 .spacer {
@@ -195,19 +252,30 @@ button.copy {
   align-items: baseline;
 }
 
+/* .node-head의 모든 자식은 줄바꿈되면 안 된다 — 하나라도 감기면 .node의
+   고정 높이를 넘어서 다음 요소와 겹친다(위 문서 Context에서 실측한 원인).
+   .uuid는 자체 규칙(overflow-x:auto)으로 이미 처리되므로 제외한다. */
+.node-head > :not(.uuid) {
+  white-space: nowrap;
+}
+
 .node-type {
   flex: none;
   width: 72px;
+  overflow: hidden;
+  text-overflow: ellipsis;
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--font-meta);
 }
 
 .node-body {
-  margin: 2px 0 0 80px;
+  margin: 2px 0 0 var(--node-body-indent);
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--font-meta);
   white-space: pre-wrap;
   word-break: break-word;
+  /* 줄 수를 폭과 무관하게 고정한다 — 행 높이가 콘텐츠에 의존하지 않게
+     만드는 것이 이 설계의 핵심이라, 여기서도 가변 높이를 허용하지 않는다. */
   max-height: 2.6em;
   overflow: hidden;
 }
