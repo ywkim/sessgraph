@@ -177,6 +177,21 @@ h1 {
   display: none;
 }
 
+/* 좁은 컨테이너에서만 실제로 잘려서 스크롤이 필요해진다(uuid-max-width가
+   none이 아닐 때). 스크롤바를 숨긴 대신, 오른쪽 가장자리를 옅게 페이드시켜
+   "더 스크롤할 내용이 있다"는 단서를 남긴다 — 이게 없으면 어디까지가 잘린
+   지점인지 시각적으로 드러나지 않는다. */
+@container node-list (max-width: 480px) {
+  .node-head .uuid {
+    mask-image: linear-gradient(to right, #000 calc(100% - 16px), transparent);
+    -webkit-mask-image: linear-gradient(
+      to right,
+      #000 calc(100% - 16px),
+      transparent
+    );
+  }
+}
+
 .segment-body {
   padding: 8px 0 16px;
 }
