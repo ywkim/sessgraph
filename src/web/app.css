@@ -183,10 +183,14 @@ h1 {
    지점인지 시각적으로 드러나지 않는다. */
 @container node-list (max-width: 480px) {
   .node-head .uuid {
-    mask-image: linear-gradient(to right, #000 calc(100% - 16px), transparent);
+    mask-image: linear-gradient(
+      to right,
+      #000 calc(100% - var(--space-4)),
+      transparent
+    );
     -webkit-mask-image: linear-gradient(
       to right,
-      #000 calc(100% - 16px),
+      #000 calc(100% - var(--space-4)),
       transparent
     );
   }
