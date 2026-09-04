@@ -31,7 +31,33 @@ export function summarizeRaw(raw: string): string {
 
 export function formatTime(timestamp: string | null): string {
   if (!timestamp) return "";
-  return timestamp.replace("T", " ").slice(0, 19);
+  try {
+    const date = new Date(timestamp);
+    if (isNaN(date.getTime())) {
+      return timestamp;
+    }
+    // 브라우저 로컬 시간대로 변환해 "YYYY-MM-DD HH:MM:SS" 포맷으로 표시한다
+    // (docs/design/20260904-1600-timezone-display.tdd.md)
+    const formatter = new Intl.DateTimeFormat(undefined, {
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hour12: false,
+    });
+    const parts = formatter.formatToParts(date);
+    const year = parts.find((p) => p.type === "year")?.value;
+    const month = parts.find((p) => p.type === "month")?.value;
+    const day = parts.find((p) => p.type === "day")?.value;
+    const hour = parts.find((p) => p.type === "hour")?.value;
+    const minute = parts.find((p) => p.type === "minute")?.value;
+    const second = parts.find((p) => p.type === "second")?.value;
+    return `${year}-${month}-${day} ${hour}:${minute}:${second}`;
+  } catch {
+    return timestamp;
+  }
 }
 
 export function escapeHtml(value: unknown): string {

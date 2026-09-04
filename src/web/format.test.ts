@@ -66,8 +66,12 @@ test("formatTime: null이면 빈 문자열", () => {
   assert.equal(formatTime(null), "");
 });
 
-test("formatTime: ISO 타임스탬프를 'T'를 공백으로 바꾸고 초 단위까지 자른다", () => {
-  assert.equal(formatTime("2026-09-03T12:34:56.789Z"), "2026-09-03 12:34:56");
+test("formatTime: ISO 타임스탬프를 로컬 시간대로 변환해 YYYY-MM-DD HH:MM:SS 포맷으로 표시한다", () => {
+  const result = formatTime("2026-09-03T12:34:56.789Z");
+  // 포맷이 맞는지 확인 (값은 시간대에 따라 다르므로 regex로만 검증)
+  assert.match(result, /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/);
+  // 같은 입력에 대해 일관된 결과인지 확인
+  assert.equal(formatTime("2026-09-03T12:34:56.789Z"), result);
 });
 
 test("escapeHtml: HTML 특수문자를 이스케이프한다", () => {
