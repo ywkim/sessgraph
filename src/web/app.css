@@ -298,3 +298,58 @@ button.copy {
   max-height: 2.6em;
   overflow: hidden;
 }
+
+/* 세션이 둘 이상일 때만 등장하는 목록 화면
+   (docs/design/20260905-0641-multi-session-serve.tdd.md). */
+.session-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.session-item {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: baseline;
+  width: 100%;
+  padding: var(--space-3);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.session-item:hover {
+  border-color: var(--muted);
+}
+
+/* 실패한 세션은 목록에서 빼지 않고 그대로 두되 클릭할 수 없게 한다 —
+   목록에서 조용히 빠지면 사용자가 그 세션의 존재 자체를 모르게 된다
+   (ADR-0004). */
+.session-item.failed {
+  cursor: default;
+  border-style: dashed;
+  border-color: var(--cut);
+}
+
+.session-label {
+  font-family: ui-monospace, SFMono-Regular, monospace;
+}
+
+.back-to-sessions {
+  display: block;
+  margin: 0 0 var(--space-4);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel);
+  font: inherit;
+  cursor: pointer;
+}
+
+.back-to-sessions:hover {
+  border-color: var(--muted);
+}

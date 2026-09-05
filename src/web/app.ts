@@ -12,6 +12,7 @@ import type {
   Segment,
   SegmentDetail,
   NodeBody,
+  SessionSummary,
 } from "../core/types.js";
 import { summarizeRaw, formatTime, escapeHtml } from "./format.js";
 
@@ -41,10 +42,94 @@ class HttpError extends Error {
 void main();
 
 async function main(): Promise<void> {
+  let sessions: SessionSummary[];
+  try {
+    sessions = await getJson<SessionSummary[]>("/api/sessions");
+  } catch (err) {
+    showBanner(`세션 목록을 읽지 못했습니다: ${(err as Error).message}`);
+    return;
+  }
+
+  if (sessions.length === 0) {
+    timelineEl.innerHTML = `<p class="muted">표시할 세션이 없습니다</p>`;
+    return;
+  }
+
+  // 세션이 하나뿐이면 목록 없이 바로 그 타임라인으로 진입한다 — 기존
+  // 단일 파일 호출의 동작을 그대로 둔다
+  // (docs/design/20260905-0641-multi-session-serve.tdd.md).
+  if (sessions.length === 1) {
+    await openSession(sessions[0]!, sessions);
+    return;
+  }
+
+  window.addEventListener("hashchange", () => void routeFromHash(sessions));
+  void routeFromHash(sessions);
+}
+
+function idFromHash(): string | null {
+  const match = /^#session\/(.+)$/.exec(location.hash);
+  return match ? decodeURIComponent(match[1]!) : null;
+}
+
+async function routeFromHash(
+  sessions: readonly SessionSummary[],
+): Promise<void> {
+  const id = idFromHash();
+  const target = id ? sessions.find((s) => s.id === id) : undefined;
+  if (target) {
+    await openSession(target, sessions);
+  } else {
+    renderSessionList(sessions);
+  }
+}
+
+/** 세션이 둘 이상일 때, 열기 전 목록 화면. 실패한 세션도 숨기지 않고 사유와 함께 보여준다 (ADR-0004). */
+function renderSessionList(sessions: readonly SessionSummary[]): void {
+  summaryEl.textContent = `세션 ${sessions.length}개`;
+  bannerEl.hidden = true;
+  warningsEl.innerHTML = "";
+  timelineEl.innerHTML = "";
+
+  const list = document.createElement("div");
+  list.className = "session-list";
+  for (const session of sessions) {
+    if (session.status === "failed") {
+      const item = document.createElement("div");
+      item.className = "session-item failed";
+      item.innerHTML = `
+        <span class="session-label">${escapeHtml(session.label)}</span>
+        <span class="warning">${escapeHtml(session.failure ?? "읽지 못했습니다")}</span>`;
+      list.append(item);
+      continue;
+    }
+    const item = document.createElement("button");
+    item.type = "button";
+    item.className = "session-item";
+    item.innerHTML = `<span class="session-label">${escapeHtml(session.label)}</span>`;
+    item.addEventListener("click", () => {
+      location.hash = `#session/${encodeURIComponent(session.id)}`;
+    });
+    list.append(item);
+  }
+  timelineEl.append(list);
+}
+
+async function openSession(
+  session: SessionSummary,
+  sessions: readonly SessionSummary[],
+): Promise<void> {
+  bannerEl.hidden = true;
+  warningsEl.innerHTML = "";
+  timelineEl.innerHTML = `<p class="muted">읽는 중…</p>`;
+
   let index: IndexResult;
   try {
-    index = await getJson<IndexResult>("/api/index");
+    index = await getJson<IndexResult>(
+      `/api/session/${encodeURIComponent(session.id)}/index`,
+    );
   } catch (err) {
+    timelineEl.innerHTML = "";
     showBanner(`인덱스를 읽지 못했습니다: ${(err as Error).message}`);
     return;
   }
@@ -54,14 +139,31 @@ async function main(): Promise<void> {
     `줄 ${index.totalLines}개 (인덱싱 ${Math.round(index.durationMs)}ms)`;
 
   renderWarnings(index);
+  timelineEl.innerHTML = "";
+
+  if (sessions.length > 1) {
+    const back = document.createElement("button");
+    back.type = "button";
+    back.className = "back-to-sessions";
+    back.textContent = `← 세션 목록 (${escapeHtml(session.label)})`;
+    back.addEventListener("click", () => {
+      location.hash = "";
+    });
+    timelineEl.append(back);
+  }
 
   if (index.segments.length === 0) {
-    timelineEl.innerHTML = `<p class="muted">표시할 기록이 없습니다</p>`;
+    timelineEl.append(
+      Object.assign(document.createElement("p"), {
+        className: "muted",
+        textContent: "표시할 기록이 없습니다",
+      }),
+    );
     return;
   }
 
   for (const segment of index.segments) {
-    timelineEl.append(renderSegment(segment));
+    timelineEl.append(renderSegment(session.id, segment));
   }
 }
 
@@ -91,7 +193,7 @@ function renderWarnings(index: IndexResult): void {
   }
 }
 
-function renderSegment(segment: Segment): HTMLElement {
+function renderSegment(sessionId: string, segment: Segment): HTMLElement {
   // 끊김을 구분해 보이되 오류로 단정하지 않는다 — 컴팩트 경계는 정상
   // 동작의 결과다 (src/web/CLAUDE.md "표시 규칙").
   const isCut = segment.rootSubtype === "compact_boundary";
@@ -121,7 +223,7 @@ function renderSegment(segment: Segment): HTMLElement {
     head.setAttribute("aria-expanded", String(!body.hidden));
     if (!body.hidden && !loaded) {
       loaded = true;
-      void loadDetail(segment.rootUuid, body);
+      void loadDetail(sessionId, segment.rootUuid, body);
     }
   });
 
@@ -129,6 +231,7 @@ function renderSegment(segment: Segment): HTMLElement {
 }
 
 async function loadDetail(
+  sessionId: string,
   rootUuid: string,
   container: HTMLElement,
 ): Promise<void> {
@@ -136,7 +239,7 @@ async function loadDetail(
   let detail: SegmentDetail;
   try {
     detail = await getJson<SegmentDetail>(
-      `/api/segment/${encodeURIComponent(rootUuid)}`,
+      `/api/session/${encodeURIComponent(sessionId)}/segment/${encodeURIComponent(rootUuid)}`,
     );
   } catch (err) {
     container.innerHTML = "";
@@ -150,7 +253,7 @@ async function loadDetail(
   if (detail.suggestedReattachCommand) {
     container.append(renderReattach(detail));
   }
-  container.append(renderVirtualList(detail.nodes));
+  container.append(renderVirtualList(sessionId, detail.nodes));
 }
 
 function renderReattach(
@@ -201,7 +304,10 @@ function renderReattach(
  * 노드 수가 수천 개여도 화면에 보이는 것만 DOM에 올린다. 본문은 그 행이
  * 실제로 보일 때 `/api/body`로 한 줄씩 가져온다.
  */
-function renderVirtualList(nodes: readonly NodeIndex[]): HTMLElement {
+function renderVirtualList(
+  sessionId: string,
+  nodes: readonly NodeIndex[],
+): HTMLElement {
   const viewport = document.createElement("div");
   viewport.className = "viewport";
   const spacer = document.createElement("div");
@@ -230,7 +336,7 @@ function renderVirtualList(nodes: readonly NodeIndex[]): HTMLElement {
     }
     for (let i = first; i <= last; i++) {
       if (mounted.has(i)) continue;
-      const el = renderNode(nodes[i]!, i);
+      const el = renderNode(sessionId, nodes[i]!, i);
       mounted.set(i, el);
       spacer.append(el);
     }
@@ -243,7 +349,11 @@ function renderVirtualList(nodes: readonly NodeIndex[]): HTMLElement {
   return viewport;
 }
 
-function renderNode(node: NodeIndex, position: number): HTMLElement {
+function renderNode(
+  sessionId: string,
+  node: NodeIndex,
+  position: number,
+): HTMLElement {
   const el = document.createElement("div");
   el.className = "node";
   el.style.top = `${position * ROW_HEIGHT}px`;
@@ -257,16 +367,22 @@ function renderNode(node: NodeIndex, position: number): HTMLElement {
     <div class="node-body">불러오는 중…</div>`;
   const bodyEl = el.querySelector<HTMLElement>(".node-body")!;
 
-  const cached = bodyCache.get(node.uuid);
+  // uuid는 한 세션 안에서만 유일하므로 캐시 키도 세션으로 구분한다 —
+  // 서로 다른 세션의 같은 uuid가 조용히 섞이는 것을 막는다
+  // (docs/design/20260905-0641-multi-session-serve.tdd.md).
+  const cacheKey = `${sessionId}:${node.uuid}`;
+  const cached = bodyCache.get(cacheKey);
   if (cached !== undefined) {
     bodyEl.textContent = cached;
     return el;
   }
 
-  getJson<NodeBody>(`/api/body?uuid=${encodeURIComponent(node.uuid)}`)
+  getJson<NodeBody>(
+    `/api/session/${encodeURIComponent(sessionId)}/body?uuid=${encodeURIComponent(node.uuid)}`,
+  )
     .then((body) => {
       const text = summarizeRaw(body.raw);
-      bodyCache.set(node.uuid, text);
+      bodyCache.set(cacheKey, text);
       bodyEl.textContent = text;
     })
     .catch((err: unknown) => {

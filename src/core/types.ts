@@ -247,6 +247,8 @@ export interface PositionalDescriptor {
   readonly name: string;
   readonly required: boolean;
   readonly description: string;
+  /** true면 이 위치 인자를 하나 이상 받는다 (마지막 위치 인자에만 허용) */
+  readonly variadic?: boolean;
 }
 
 export interface OptionDescriptor {
@@ -319,4 +321,18 @@ export interface NodeBody {
   readonly uuid: string;
   /** 원본 JSONL 한 줄 (파싱하지 않은 그대로) */
   readonly raw: string;
+}
+
+/**
+ * `/api/sessions`가 응답하는 목록 항목 하나
+ * (docs/design/20260905-0641-multi-session-serve.tdd.md).
+ */
+export interface SessionSummary {
+  /** 절대경로의 sha256 앞 12자(hex). 조회 키 — 어떤 조회에도 label을 쓰지 않는다 */
+  readonly id: string;
+  /** 사람이 읽는 이름(표시 전용). 중복될 수 있다 */
+  readonly label: string;
+  readonly status: "unread" | "ready" | "failed";
+  /** status가 "failed"일 때만 값을 가진다 */
+  readonly failure: string | null;
 }
