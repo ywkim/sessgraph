@@ -7,6 +7,7 @@
 // 잡아준다"를 웹 경계까지 적용).
 
 import type {
+  BranchPoint,
   IndexResult,
   NodeIndex,
   Segment,
@@ -294,7 +295,9 @@ async function loadDetail(
   if (detail.suggestedReattachCommand) {
     container.append(renderReattach(detail));
   }
-  container.append(renderVirtualList(sessionId, detail.nodes));
+  container.append(
+    renderVirtualList(sessionId, detail.nodes, detail.branches),
+  );
 }
 
 function renderReattach(
@@ -348,7 +351,11 @@ function renderReattach(
 function renderVirtualList(
   sessionId: string,
   nodes: readonly NodeIndex[],
+  branches: readonly BranchPoint[],
 ): HTMLElement {
+  const branchByParent = new Map<string, BranchPoint>();
+  for (const b of branches) branchByParent.set(b.parentUuid, b);
+
   const viewport = document.createElement("div");
   viewport.className = "viewport";
   const spacer = document.createElement("div");
@@ -377,7 +384,12 @@ function renderVirtualList(
     }
     for (let i = first; i <= last; i++) {
       if (mounted.has(i)) continue;
-      const el = renderNode(sessionId, nodes[i]!, i);
+      const el = renderNode(
+        sessionId,
+        nodes[i]!,
+        i,
+        branchByParent.get(nodes[i]!.uuid),
+      );
       mounted.set(i, el);
       spacer.append(el);
     }
@@ -394,15 +406,22 @@ function renderNode(
   sessionId: string,
   node: NodeIndex,
   position: number,
+  branch: BranchPoint | undefined,
 ): HTMLElement {
   const el = document.createElement("div");
   el.className = "node";
   el.style.top = `${position * ROW_HEIGHT}px`;
   el.style.height = `${ROW_HEIGHT}px`;
+  // 곁가지 표시는 존재와 개수만 알린다 — 클릭 동작 없음(Spec "화면"). 행의
+  // 고정 높이를 지키기 위해 새 줄이 아니라 head 안에 배지로 얹는다.
+  const branchBadge = branch
+    ? `<span class="branch muted">곁가지 ${branch.discardedUuids.length}개(재실행/수정)</span>`
+    : "";
   el.innerHTML = `
     <div class="node-head">
       <span class="node-type">${escapeHtml(node.subtype ?? node.type)}</span>
       <span class="uuid grow">${escapeHtml(node.uuid)}</span>
+      ${branchBadge}
       <span class="muted">${formatTime(node.timestamp)}</span>
     </div>
     <div class="node-body">불러오는 중…</div>`;

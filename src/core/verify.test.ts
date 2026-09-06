@@ -44,6 +44,8 @@ function nodesFromFixture(name: string): Map<string, NodeIndex> {
       lineNo,
       byteOffset: 0,
       byteLength: 0,
+      isSidechain: false,
+      isToolResultShape: false,
     });
   }
   return nodes;

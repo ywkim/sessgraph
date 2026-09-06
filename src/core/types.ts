@@ -65,6 +65,10 @@ export interface NodeIndex {
   readonly lineNo: number;
   readonly byteOffset: number;
   readonly byteLength: number;
+  /** 레코드의 `isSidechain` 필드. 없으면 `false` (docs/spec/20260906-1400-segment-branch-view.spec.md). */
+  readonly isSidechain: boolean;
+  /** `content[0]`이 `tool_result` 블록이면 `true`. 도구 병렬 호출 분기를 걸러내는 데만 쓴다. */
+  readonly isToolResultShape: boolean;
 }
 
 /**
@@ -301,10 +305,24 @@ export type SuggestedParentSource = "recorded" | "inferred";
  * 필드가 독립된 `string | null`/`SuggestedParentSource | null`이라 이
  * 관계를 타입 시스템이 몰랐고, 호출부가 `!`로 우회해야 했다.
  */
+/**
+ * 한 세그먼트 안에서 사용자 재실행/수정으로 갈라진 지점 하나
+ * (docs/spec/20260906-1400-segment-branch-view.spec.md).
+ */
+export interface BranchPoint {
+  readonly parentUuid: string;
+  /** DFS가 실제로 따라간 자식 — childrenByParent 배열의 마지막 원소 */
+  readonly adoptedUuid: string;
+  /** 채택되지 않은 나머지 자식 uuid들. 길이 ≥ 1 */
+  readonly discardedUuids: readonly string[];
+}
+
 export type SegmentDetail = {
   readonly segment: Segment;
   /** 이 세그먼트에 속한 노드들 (root → leaf 순서). 본문은 포함하지 않는다. */
   readonly nodes: readonly NodeIndex[];
+  /** 이 세그먼트 안에서 발견된 실제 분기점 (도구 병렬 호출 노이즈 제외). */
+  readonly branches: readonly BranchPoint[];
 } & (
   | {
       readonly suggestedReattachCommand: null;
