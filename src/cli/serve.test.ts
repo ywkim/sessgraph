@@ -22,10 +22,10 @@ import {
   sessionIdOf,
 } from "./serve.js";
 import type {
+  IndexResult,
   NodeBody,
   SearchResult,
   SegmentDetail,
-  SessionIndexView,
   SessionSearchResult,
   SessionSummary,
 } from "../core/types.js";
@@ -101,14 +101,13 @@ test("serve: /api/session/:id/index는 inspect와 같은 IndexResult를 돌려�
   await withServer("compact-split", async (base, file, id) => {
     const res = await fetch(`${base}/api/session/${id}/index`);
     assert.equal(res.status, 200);
-    const served = (await res.json()) as SessionIndexView;
+    const served = (await res.json()) as IndexResult;
     const direct = buildIndexDetailed(file).index;
-    assert.equal(served.index.nodeCount, direct.nodeCount);
+    assert.equal(served.nodeCount, direct.nodeCount);
     assert.deepEqual(
-      served.index.segments.map((s) => s.rootUuid),
+      served.segments.map((s) => s.rootUuid),
       direct.segments.map((s) => s.rootUuid),
     );
-    assert.equal(served.origins.length, served.index.segments.length);
   });
 });
 
@@ -169,8 +168,8 @@ test("serve: reattach로 원본이 바뀌면 /api/session/:id/index가 재인덱
   await withServer("compact-split", async (base, file, id) => {
     const beforeRes = await fetch(`${base}/api/session/${id}/index`);
     assert.equal(beforeRes.status, 200);
-    const before = (await beforeRes.json()) as SessionIndexView;
-    assert.equal(before.index.segments.length, 2);
+    const before = (await beforeRes.json()) as IndexResult;
+    assert.equal(before.segments.length, 2);
 
     // 세 번째 노드(끊김 지점)를 첫 번째 노드에 실제로 재연결한다 —
     // `reattach` CLI가 하는 것과 같은 변경(부모 필드만 교체). 재연결 결과
@@ -185,8 +184,8 @@ test("serve: reattach로 원본이 바뀌면 /api/session/:id/index가 재인덱
 
     const afterRes = await fetch(`${base}/api/session/${id}/index`);
     assert.equal(afterRes.status, 200, "409로 막히지 않고 재인덱싱되어야 함");
-    const after = (await afterRes.json()) as SessionIndexView;
-    assert.equal(after.index.segments.length, 1);
+    const after = (await afterRes.json()) as IndexResult;
+    assert.equal(after.segments.length, 1);
   });
 });
 
@@ -220,7 +219,7 @@ test("serve: append만 발생해도 409 없이 200 + 노드 수 증가를 반영
   await withServer("compact-split", async (base, file, id) => {
     const before = (await (
       await fetch(`${base}/api/session/${id}/index`)
-    ).json()) as SessionIndexView;
+    ).json()) as IndexResult;
 
     appendFileSync(
       file,
@@ -234,8 +233,8 @@ test("serve: append만 발생해도 409 없이 200 + 노드 수 증가를 반영
 
     const afterRes = await fetch(`${base}/api/session/${id}/index`);
     assert.equal(afterRes.status, 200);
-    const after = (await afterRes.json()) as SessionIndexView;
-    assert.equal(after.index.nodeCount, before.index.nodeCount + 1);
+    const after = (await afterRes.json()) as IndexResult;
+    assert.equal(after.nodeCount, before.nodeCount + 1);
   });
 });
 
@@ -424,10 +423,9 @@ test("serve: 빈 파일도 정상 기동하고 세그먼트 0개를 응답한다
   await withServer("empty", async (base, _file, id) => {
     const res = await fetch(`${base}/api/session/${id}/index`);
     assert.equal(res.status, 200);
-    const view = (await res.json()) as SessionIndexView;
-    assert.equal(view.index.nodeCount, 0);
-    assert.deepEqual(view.index.segments, []);
-    assert.deepEqual(view.origins, []);
+    const index = (await res.json()) as IndexResult;
+    assert.equal(index.nodeCount, 0);
+    assert.deepEqual(index.segments, []);
   });
 });
 

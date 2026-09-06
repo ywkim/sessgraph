@@ -200,32 +200,6 @@ h1 {
   padding: 8px 0 16px;
 }
 
-/* 조각을 펼치지 않고도 출처를 보여주는 줄
-   (docs/spec/20260906-2000-segment-origin-backlink.spec.md "화면"). */
-.origin {
-  padding: 2px 0 6px;
-  font-size: 12px;
-  color: var(--muted);
-}
-
-/* 추정값(직전 조각의 leaf) — 실측에서 44%, 9.5% 틀렸으므로 확인이
-   필요한 자리임을 목록에서부터 구분한다 (ADR-0005). */
-.origin.inferred {
-  color: var(--cut);
-}
-
-button.origin.link {
-  display: block;
-  width: 100%;
-  border: none;
-  background: none;
-  font: inherit;
-  text-align: left;
-  cursor: pointer;
-  text-decoration: underline;
-  text-decoration-style: dotted;
-}
-
 .reattach {
   margin: 0 0 12px;
   padding: 10px 12px;
