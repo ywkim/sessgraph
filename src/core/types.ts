@@ -317,42 +317,6 @@ export type SegmentDetail = {
     }
 );
 
-/* ── segment-origin (docs/spec/20260906-2000-segment-origin-backlink.spec.md) ── */
-
-/**
- * 한 조각이 어디서 이어져 오는가.
- *
- * `missing`이 이 타입의 존재 이유다 — 기록된 값이 파일 안에 없는 상태를
- * `inferred`로 조용히 대체하면, 스키마가 바뀐 사실이 추정값으로 위장된다
- * (ADR-0004, 루트 CLAUDE.md "외부 스키마 의존").
- */
-export type SegmentOrigin =
-  /** 조각의 root가 컴팩트 경계가 아니다 — 기록의 진짜 시작점이라 이을 대상이 아니다 */
-  | { readonly kind: "start" }
-  /** 경계 레코드에 기록된 부모가 있고, 그 uuid가 파일 안에 있다 */
-  | {
-      readonly kind: "recorded";
-      readonly parentUuid: string;
-      /** 그 uuid가 속한 조각의 root. 어떤 조각에도 속하지 않으면 null */
-      readonly parentSegmentRootUuid: string | null;
-    }
-  /** 기록된 부모가 없어 직전 조각의 마지막 항목으로 추정했다 (ADR-0005) */
-  | {
-      readonly kind: "inferred";
-      readonly parentUuid: string;
-      readonly parentSegmentRootUuid: string | null;
-    }
-  /** 기록된 부모가 있으나 그 uuid가 파일에 없다 */
-  | { readonly kind: "missing"; readonly parentUuid: string }
-  /** 경계인데 기록된 부모도 없고 직전 조각도 없다 — 채울 값이 없다 */
-  | { readonly kind: "unresolved" };
-
-/** `/api/session/:id/index`의 응답. origins는 index.segments와 같은 길이·같은 순서다. */
-export interface SessionIndexView {
-  readonly index: IndexResult;
-  readonly origins: readonly SegmentOrigin[];
-}
-
 export interface NodeBody {
   readonly uuid: string;
   /** 원본 JSONL 한 줄 (파싱하지 않은 그대로) */

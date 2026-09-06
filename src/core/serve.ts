@@ -1,5 +1,10 @@
-import type { IndexResult, NodeIndex, SegmentDetail } from "./types.js";
-import { resolveSegmentOrigins } from "./segment-origin.js";
+import { COMPACT_BOUNDARY } from "./types.js";
+import type {
+  IndexResult,
+  NodeIndex,
+  SegmentDetail,
+  SuggestedParentSource,
+} from "./types.js";
 
 /**
  * 한 세그먼트의 노드 목록과 화면에 표시할 재연결 명령어를 계산한다.
@@ -51,15 +56,8 @@ export function buildSegmentDetail(
     collected.sort((a, b) => a.lineNo - b.lineNo);
   }
 
-  // origins를 조각 하나만 위해 다시 계산한다 — 목록(`/api/session/:id/index`)과
-  // 같은 규칙을 두 곳에서 따로 구현하지 않기 위해서다
-  // (docs/design/20260906-2000-segment-origin-backlink.tdd.md "이을 지점 계산은 한 곳에만 둔다").
-  const origin = resolveSegmentOrigins(index, nodes)[segmentIndex]!;
-
-  if (origin.kind !== "recorded" && origin.kind !== "inferred") {
-    // start/unresolved/missing — 기록된 uuid가 파일에 없는 경우를 포함해
-    // 채울 값이 없거나 확인 없이 단정할 수 없으므로 제안하지 않는다
-    // (Spec "SegmentDetail의 기존 동작 변경").
+  if (segment.rootSubtype !== COMPACT_BOUNDARY) {
+    // 진짜 세션 시작점 — 이을 대상이 아니다 (Spec "엣지 케이스").
     return {
       segment,
       nodes: collected,
@@ -68,13 +66,28 @@ export function buildSegmentDetail(
     };
   }
 
+  const recorded = segment.rootLogicalParentUuid;
+  const previous = index.segments[segmentIndex - 1];
+  const parentUuid = recorded ?? previous?.leafUuid ?? null;
+  if (parentUuid === null) {
+    // 기록된 부모도 없고 직전 조각도 없다 — 채울 값이 없으므로 제안하지
+    // 않는다. 빈 `--parent`를 복사시키는 것보다 낫다.
+    return {
+      segment,
+      nodes: collected,
+      suggestedReattachCommand: null,
+      suggestedParentSource: null,
+    };
+  }
+
+  const source: SuggestedParentSource = recorded ? "recorded" : "inferred";
   // `--reason`은 사용자가 채워야 하므로 빈 자리로 둔다 (Spec "데이터 모델").
-  const command = `sessgraph reattach ${filePath} --uuid ${segment.rootUuid} --parent ${origin.parentUuid} --reason ""`;
+  const command = `sessgraph reattach ${filePath} --uuid ${segment.rootUuid} --parent ${parentUuid} --reason ""`;
 
   return {
     segment,
     nodes: collected,
     suggestedReattachCommand: command,
-    suggestedParentSource: origin.kind,
+    suggestedParentSource: source,
   };
 }
