@@ -24,7 +24,9 @@ import {
 import type {
   IndexResult,
   NodeBody,
+  SearchResult,
   SegmentDetail,
+  SessionSearchResult,
   SessionSummary,
 } from "../core/types.js";
 
@@ -234,6 +236,81 @@ test("serve: append만 발생해도 409 없이 200 + 노드 수 증가를 반영
     const after = (await afterRes.json()) as IndexResult;
     assert.equal(after.nodeCount, before.nodeCount + 1);
   });
+});
+
+test("serve: /api/session/:id/search는 매치를 노드에 귀속시켜 돌려준다", async () => {
+  await withServer("compact-split", async (base, _file, id) => {
+    const res = await fetch(
+      `${base}/api/session/${id}/search?q=${encodeURIComponent("assistant")}`,
+    );
+    assert.equal(res.status, 200);
+    const result = (await res.json()) as SearchResult;
+    assert.equal(result.query, "assistant");
+    assert.equal(result.truncated, false);
+    assert.equal(result.matches.length, 2); // "assistant" 타입 레코드 2건(U2, U5)
+    for (const match of result.matches) {
+      assert.equal(match.attribution.kind, "segment");
+    }
+  });
+});
+
+test("serve: /api/session/:id/search는 q 누락 시 400", async () => {
+  await withServer("compact-split", async (base, _file, id) => {
+    const res = await fetch(`${base}/api/session/${id}/search`);
+    assert.equal(res.status, 400);
+  });
+});
+
+test("serve: /api/session/:id/search는 매치 0건도 200", async () => {
+  await withServer("compact-split", async (base, _file, id) => {
+    const res = await fetch(
+      `${base}/api/session/${id}/search?q=${encodeURIComponent("존재하지않는문구")}`,
+    );
+    assert.equal(res.status, 200);
+    const result = (await res.json()) as SearchResult;
+    assert.deepEqual(result.matches, []);
+  });
+});
+
+test("serve: 알 수 없는 세션 id의 검색은 404", async () => {
+  await withServer("compact-split", async (base) => {
+    const res = await fetch(`${base}/api/session/deadbeef0000/search?q=x`);
+    assert.equal(res.status, 404);
+  });
+});
+
+test("serve: /api/search는 /api/sessions와 같은 순서로 세션당 한 항목씩 돌려준다", async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "sessgraph-serve-"));
+  const fileA = path.join(dir, "a.jsonl");
+  const fileB = path.join(dir, "b.jsonl");
+  copyFileSync(path.join(fixturesDir, "compact-split.anon.jsonl"), fileA);
+  copyFileSync(path.join(fixturesDir, "no-parent-field.anon.jsonl"), fileB);
+  const registry = registerSessions([fileA, fileB]);
+  const server = createServer(createRequestHandler(registry));
+  await new Promise<void>((resolve) =>
+    server.listen(0, "127.0.0.1", () => resolve()),
+  );
+  const address = server.address();
+  const port = typeof address === "object" && address ? address.port : 0;
+  const base = `http://127.0.0.1:${port}`;
+  try {
+    const sessions = (await (
+      await fetch(`${base}/api/sessions`)
+    ).json()) as SessionSummary[];
+    const res = await fetch(`${base}/api/search?q=assistant`);
+    assert.equal(res.status, 200);
+    const results = (await res.json()) as SessionSearchResult[];
+    assert.deepEqual(
+      results.map((r) => r.sessionId),
+      sessions.map((s) => s.id),
+    );
+    assert.equal(results[0]!.failure, null);
+    assert.ok(results[0]!.result);
+    assert.equal(results[1]!.result, null);
+    assert.match(results[1]!.failure ?? "", /parentUuid 필드가 전혀 없습니다/);
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
 });
 
 test("isStale: size·mtime이 같아도 inode가 다르면 stale이다", () => {

@@ -12,6 +12,9 @@ import type {
   Segment,
   SegmentDetail,
   NodeBody,
+  SearchMatch,
+  SearchResult,
+  SessionSearchResult,
   SessionSummary,
 } from "../core/types.js";
 import { summarizeRaw, formatTime, escapeHtml } from "./format.js";
@@ -27,8 +30,25 @@ const summaryEl = document.getElementById("summary")!;
 const bannerEl = document.getElementById("banner")!;
 const warningsEl = document.getElementById("warnings")!;
 const timelineEl = document.getElementById("timeline")!;
+const searchFormEl = document.getElementById("search-form") as HTMLFormElement;
+const searchInputEl = document.getElementById(
+  "search-input",
+) as HTMLInputElement;
+const searchResultsEl = document.getElementById("search-results")!;
 
 const bodyCache = new Map<string, string>();
+
+/** 화면에 세션 목록이 떠 있으면 null — 그때 검색은 /api/search로 전 세션을 훑는다. */
+let currentSessionId: string | null = null;
+let knownSessions: readonly SessionSummary[] = [];
+
+/** 검색어에 큰따옴표·역슬래시·개행이 있으면 저장 형태가 달라 0건이 나올 수 있다 (Spec "화면"). */
+const UNESCAPABLE_CHARS = /["\\\n]/;
+
+searchFormEl.addEventListener("submit", (e) => {
+  e.preventDefault();
+  void runSearch(searchInputEl.value.trim());
+});
 
 class HttpError extends Error {
   constructor(
@@ -86,6 +106,9 @@ async function routeFromHash(
 
 /** 세션이 둘 이상일 때, 열기 전 목록 화면. 실패한 세션도 숨기지 않고 사유와 함께 보여준다 (ADR-0004). */
 function renderSessionList(sessions: readonly SessionSummary[]): void {
+  currentSessionId = null;
+  knownSessions = sessions;
+  searchResultsEl.innerHTML = "";
   summaryEl.textContent = `세션 ${sessions.length}개`;
   bannerEl.hidden = true;
   warningsEl.innerHTML = "";
@@ -119,6 +142,9 @@ async function openSession(
   session: SessionSummary,
   sessions: readonly SessionSummary[],
 ): Promise<void> {
+  currentSessionId = session.id;
+  knownSessions = sessions;
+  searchResultsEl.innerHTML = "";
   bannerEl.hidden = true;
   warningsEl.innerHTML = "";
   timelineEl.innerHTML = `<p class="muted">읽는 중…</p>`;
@@ -204,6 +230,7 @@ function renderSegment(sessionId: string, segment: Segment): HTMLElement {
   const head = document.createElement("button");
   head.className = "segment-head";
   head.type = "button";
+  head.dataset.rootUuid = segment.rootUuid;
   head.setAttribute("aria-expanded", "false");
   head.innerHTML = `
     <span class="badge ${isCut ? "cut" : ""}">${isCut ? "컴팩트 경계" : "세션 시작점"}</span>
@@ -392,6 +419,166 @@ function renderNode(
     });
 
   return el;
+}
+
+/** 세션이 열려 있으면 그 안에서만, 목록 화면이면 전 세션에서 찾는다. */
+async function runSearch(query: string): Promise<void> {
+  if (!query) {
+    searchResultsEl.innerHTML = "";
+    return;
+  }
+  searchResultsEl.innerHTML = `<p class="muted">찾는 중…</p>`;
+  try {
+    if (currentSessionId) {
+      const result = await getJson<SearchResult>(
+        `/api/session/${encodeURIComponent(currentSessionId)}/search?q=${encodeURIComponent(query)}`,
+      );
+      searchResultsEl.innerHTML = "";
+      searchResultsEl.append(
+        renderSearchResult(currentSessionId, result, query, null),
+      );
+    } else {
+      const results = await getJson<SessionSearchResult[]>(
+        `/api/search?q=${encodeURIComponent(query)}`,
+      );
+      renderMultiSessionResults(results, query);
+    }
+  } catch (err) {
+    searchResultsEl.innerHTML = "";
+    searchResultsEl.append(
+      errorLine(`검색하지 못했습니다: ${(err as Error).message}`),
+    );
+  }
+}
+
+function renderMultiSessionResults(
+  results: readonly SessionSearchResult[],
+  query: string,
+): void {
+  searchResultsEl.innerHTML = "";
+  let any = false;
+  for (const entry of results) {
+    if (entry.failure !== null) {
+      searchResultsEl.append(errorLine(`세션 검색 실패: ${entry.failure}`));
+      continue;
+    }
+    if (entry.result.matches.length === 0) continue;
+    any = true;
+    const session = knownSessions.find((s) => s.id === entry.sessionId);
+    searchResultsEl.append(
+      renderSearchResult(
+        entry.sessionId,
+        entry.result,
+        query,
+        session?.label ?? entry.sessionId,
+      ),
+    );
+  }
+  if (!any) searchResultsEl.append(noMatchesNote(query));
+}
+
+/** 결과는 세그먼트별로 묶어 보여준다 (Spec "화면"). */
+function renderSearchResult(
+  sessionId: string,
+  result: SearchResult,
+  query: string,
+  label: string | null,
+): HTMLElement {
+  const box = document.createElement("div");
+  box.className = "search-result";
+
+  if (label !== null) {
+    const heading = document.createElement("div");
+    heading.className = "muted";
+    heading.textContent = label;
+    box.append(heading);
+  }
+
+  if (result.matches.length === 0) {
+    box.append(noMatchesNote(query));
+    return box;
+  }
+
+  if (result.truncated) {
+    box.append(
+      Object.assign(document.createElement("div"), {
+        className: "warning",
+        textContent: "매치가 너무 많아 앞의 1,000건만 표시합니다",
+      }),
+    );
+  }
+
+  const clickable = result.matches.filter(
+    (m) => m.attribution.kind === "segment",
+  );
+  const rest = result.matches.filter((m) => m.attribution.kind !== "segment");
+
+  for (const match of clickable)
+    box.append(renderMatchLine(sessionId, match, true));
+
+  if (rest.length > 0) {
+    const restBox = document.createElement("div");
+    restBox.className = "search-unattributed";
+    restBox.append(
+      Object.assign(document.createElement("div"), {
+        className: "muted",
+        // "이 매치를 버리는 것이 이 설계가 막으려는 실패다" (Spec "귀속") —
+        // 조용히 빼지 않고 별도 묶음으로 보여준다.
+        textContent: `조각으로 이동할 수 없는 매치 ${rest.length}건 — 인덱스가 배제했거나 구조를 판단하지 못한 레코드입니다`,
+      }),
+    );
+    for (const match of rest)
+      restBox.append(renderMatchLine(sessionId, match, false));
+    box.append(restBox);
+  }
+
+  return box;
+}
+
+function noMatchesNote(query: string): HTMLElement {
+  const p = document.createElement("p");
+  p.className = "muted";
+  p.textContent = "찾지 못했습니다";
+  // 확신에 찬 0건이 가장 위험한 답이다 (ADR-0004, Spec "화면").
+  if (UNESCAPABLE_CHARS.test(query)) {
+    p.textContent +=
+      " — 검색어에 큰따옴표·역슬래시·개행이 있으면 저장 형태가 달라 찾지 못할 수 있습니다";
+  }
+  return p;
+}
+
+function renderMatchLine(
+  sessionId: string,
+  match: SearchMatch,
+  clickable: boolean,
+): HTMLElement {
+  const el = document.createElement(clickable ? "button" : "div");
+  el.className = clickable ? "search-match" : "search-match unindexed";
+  if (el instanceof HTMLButtonElement) el.type = "button";
+  el.innerHTML = `<span class="search-excerpt">${escapeHtml(match.excerpt)}</span>`;
+
+  if (clickable && match.attribution.kind === "segment") {
+    const rootUuid = match.attribution.segmentRootUuid;
+    el.addEventListener("click", () => {
+      const alreadyOpen = currentSessionId === sessionId;
+      if (!alreadyOpen) {
+        location.hash = `#session/${encodeURIComponent(sessionId)}`;
+        return;
+      }
+      expandSegment(rootUuid);
+    });
+  }
+
+  return el;
+}
+
+function expandSegment(rootUuid: string): void {
+  const head = timelineEl.querySelector<HTMLButtonElement>(
+    `[data-root-uuid="${CSS.escape(rootUuid)}"]`,
+  );
+  if (!head) return;
+  if (head.getAttribute("aria-expanded") !== "true") head.click();
+  head.scrollIntoView({ block: "center" });
 }
 
 function showBanner(message: string): void {

@@ -34,3 +34,28 @@ export function findSegmentForUuid(
   }
   return segment;
 }
+
+/**
+ * `findSegmentForUuid`의 비throw 변형 — 검색(`src/core/search.ts`)이 쓴다.
+ *
+ * orphan의 하위 노드는 부모 체인을 거슬러도 어떤 세그먼트 root에도 닿지
+ * 않는다. 검색에서 이것은 예외가 아니라 결과로 보고해야 할 상태이므로,
+ * 기존 `findSegmentForUuid`의 throw 계약은 바꾸지 않고 이 함수를 따로 둔다
+ * (docs/spec/20260906-0900-body-search.spec.md "코어 함수").
+ */
+export function tryFindSegmentForUuid(
+  index: IndexResult,
+  nodes: ReadonlyMap<string, NodeIndex>,
+  uuid: string,
+): Segment | null {
+  let cursor = uuid;
+  const visited = new Set<string>();
+  for (;;) {
+    const node = nodes.get(cursor);
+    if (!node || node.parentUuid === null) break;
+    if (visited.has(cursor)) break;
+    visited.add(cursor);
+    cursor = node.parentUuid;
+  }
+  return index.segments.find((s) => s.rootUuid === cursor) ?? null;
+}
