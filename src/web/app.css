@@ -375,6 +375,7 @@ button.copy {
   border: 1px solid var(--line);
   border-radius: 6px;
   background: var(--panel);
+  color: inherit;
   font: inherit;
   cursor: pointer;
 }
