@@ -74,3 +74,13 @@ test("buildSegmentDetail: 어떤 세그먼트의 root도 아니면 null", () => 
   const { detail } = detailFor("compact-split", U(4));
   assert.equal(detail, null);
 });
+
+test("buildSegmentDetail: 기록된 부모 uuid가 파일에 없으면 recorded로 단정하지 않고 제안하지 않는다", () => {
+  // 존재하지 않는 지점을 "기록된 부모"라고 단정해 복사시키는 것은 정확성
+  // 원칙에 어긋난다 (docs/spec/20260906-2000-segment-origin-backlink.spec.md
+  // "SegmentDetail의 기존 동작 변경").
+  const { detail } = detailFor("missing-logical-parent", U(3));
+  assert.ok(detail);
+  assert.equal(detail.suggestedReattachCommand, null);
+  assert.equal(detail.suggestedParentSource, null);
+});

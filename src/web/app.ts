@@ -11,6 +11,8 @@ import type {
   NodeIndex,
   Segment,
   SegmentDetail,
+  SegmentOrigin,
+  SessionIndexView,
   NodeBody,
   SearchMatch,
   SearchResult,
@@ -164,10 +166,13 @@ async function openSession(
   timelineEl.innerHTML = `<p class="muted">읽는 중…</p>`;
 
   let index: IndexResult;
+  let origins: readonly SegmentOrigin[];
   try {
-    index = await getJson<IndexResult>(
+    const view = await getJson<SessionIndexView>(
       `/api/session/${encodeURIComponent(session.id)}/index`,
     );
+    index = view.index;
+    origins = view.origins;
   } catch (err) {
     timelineEl.innerHTML = "";
     showBanner(`인덱스를 읽지 못했습니다: ${(err as Error).message}`);
@@ -202,9 +207,9 @@ async function openSession(
     return;
   }
 
-  for (const segment of index.segments) {
-    timelineEl.append(renderSegment(session.id, segment));
-  }
+  index.segments.forEach((segment, i) => {
+    timelineEl.append(renderSegment(session.id, segment, origins[i]!, index));
+  });
 }
 
 /** 도구가 판단하지 못한 케이스를 숨기지 않는다 (ADR-0004). */
@@ -233,7 +238,12 @@ function renderWarnings(index: IndexResult): void {
   }
 }
 
-function renderSegment(sessionId: string, segment: Segment): HTMLElement {
+function renderSegment(
+  sessionId: string,
+  segment: Segment,
+  origin: SegmentOrigin,
+  index: IndexResult,
+): HTMLElement {
   // 끊김을 구분해 보이되 오류로 단정하지 않는다 — 컴팩트 경계는 정상
   // 동작의 결과다 (src/web/CLAUDE.md "표시 규칙").
   const isCut = segment.rootSubtype === "compact_boundary";
@@ -253,6 +263,8 @@ function renderSegment(sessionId: string, segment: Segment): HTMLElement {
     <span class="muted">${formatTime(segment.startTimestamp)}</span>`;
   wrap.append(head);
 
+  wrap.append(renderOrigin(origin, index));
+
   const body = document.createElement("div");
   body.className = "segment-body";
   body.hidden = true;
@@ -269,6 +281,62 @@ function renderSegment(sessionId: string, segment: Segment): HTMLElement {
   });
 
   return wrap;
+}
+
+/**
+ * 조각을 펼치지 않고도 출처를 보여주는 한 줄
+ * (docs/spec/20260906-2000-segment-origin-backlink.spec.md "화면").
+ *
+ * `start`도 생략하지 않는다 — 생략하면 "이 조각만 백링크를 못 그렸나"와
+ * 구분할 수 없다.
+ */
+function renderOrigin(origin: SegmentOrigin, index: IndexResult): HTMLElement {
+  const line = document.createElement("div");
+  line.className = "origin";
+
+  if (origin.kind === "start") {
+    line.className = "origin muted";
+    line.textContent = "기록의 시작";
+    return line;
+  }
+
+  if (origin.kind === "unresolved") {
+    line.className = "origin muted";
+    line.textContent = "이어질 곳을 찾지 못함";
+    return line;
+  }
+
+  if (origin.kind === "missing") {
+    line.className = "origin inferred";
+    line.textContent = `이전: ${origin.parentUuid.slice(0, 8)} — 기록된 이전 지점을 파일에서 찾지 못함`;
+    return line;
+  }
+
+  // recorded | inferred
+  const label = origin.kind === "recorded" ? "기록됨" : "추정값 — 확인 후 사용";
+  const targetRoot = origin.parentSegmentRootUuid;
+  const targetSegment = targetRoot
+    ? index.segments.find((s) => s.rootUuid === targetRoot)
+    : null;
+  const targetLabel = targetSegment
+    ? `${formatTime(targetSegment.startTimestamp)} · ${origin.parentUuid.slice(0, 8)}`
+    : origin.parentUuid.slice(0, 8);
+
+  if (targetRoot) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className =
+      origin.kind === "recorded" ? "origin link" : "origin link inferred";
+    button.textContent = `이전: ${targetLabel} · ${label}`;
+    button.addEventListener("click", () => {
+      expandSegment(targetRoot);
+    });
+    return button;
+  }
+
+  line.className = origin.kind === "recorded" ? "origin" : "origin inferred";
+  line.textContent = `이전: ${targetLabel} · ${label}`;
+  return line;
 }
 
 async function loadDetail(
