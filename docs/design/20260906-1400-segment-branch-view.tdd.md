@@ -34,6 +34,14 @@ src/web: 조각을 펼쳤을 때, 진짜 분기가 있는 부모 노드 아래�
   "곁가지 N개(재실행/수정)" 한 줄만 표시. 노이즈 분기는 아무 표시도 하지 않는다
 ```
 
+## 데이터 흐름
+
+1. **인덱싱**: `build-index.ts`가 각 JSONL 줄을 파싱하며 `isSidechain`, `isToolResultShape`를 `NodeIndex`에 함께 싣는다 — 추가 파일 읽기 없음
+2. **조각 펼치기 요청**: `GET /api/session/:id/segment/:rootUuid` 호출 시 `buildSegmentDetail`이 `childrenByParent` 맵을 만든다(기존 동작, 변경 없음)
+3. **분기 판정**: `resolveSegmentBranches(childrenByParent)`가 자식이 둘 이상인 부모를 순회해, `isSidechain`/`isToolResultShape`가 모두 `false`인 자식이 2개 이상인 경우에만 `BranchPoint`를 만든다
+4. **응답**: `SegmentDetail.branches`에 실어 반환한다. 에러 처리 경로 없음 — 필드 부재는 `false` 기본값으로 흡수되어 예외를 던지지 않는다(ADR-0004)
+5. **화면**: 조각을 펼친 상태에서만 해당 부모 노드 아래에 "곁가지 N개(재실행/수정)" 표시
+
 ### 진짜 분기와 노이즈를 가르는 기준을 어디서 계산하는가
 
 실측(1,633세션, uuid 중복 제거 후)에서 자식이 둘 이상인 부모 32,935개 중 27,239개는 자식이 전부 tool_use/tool_result인 구조적 산물이었고, 5,696개만 사용자 메시지가 둘 이상 갈라진 진짜 재실행/수정이었다. 이 구분에는 **레코드의 `type`만으로는 부족하다** — Claude Code JSONL에서 tool_result도 `type: "user"`로 기록되기 때문에, `content` 배열 안에 `tool_result` 블록이 있는지까지 봐야 한다.
@@ -72,12 +80,12 @@ readonly isToolResultShape: boolean;
 
 `buildSegmentDetail`의 DFS는 `childrenByParent.get(current.uuid)`가 반환한 배열을 스택에 그대로 push한다 — 즉 **가장 마지막에 등장한 자식이 스택 맨 위**라 먼저 pop되어 앞쪽에 나열된다(자바스크립트 배열 push/pop 순서. lineNo 정렬 전 임시 순서일 뿐이지만, 실질적으로는 파일에 나중에 쓰인 자식이 우선). 이 순서를 "채택 경로"로 그대로 인정한다 — PRD Non-Goals가 명시했듯 더 나은 채택 기준이 필요한지는 확인되지 않았다. 나머지 자식은 전부 "곁가지"로 묶는다.
 
-## 성능/리스크
+### 성능/리스크
 
 - `NodeIndex` 필드 추가는 인덱스 하나당 boolean 두 개(≈2바이트) 증가 — 실측 기준선(항목 10,726개)에서 무시할 수 있는 크기다
 - `resolveSegmentBranches`는 조각 하나의 `childrenByParent`만 순회한다 — 세션 전체를 다시 훑지 않는다
 
-## 향후 확장 (이번 범위 아님)
+## 향후 확장 고려사항
 
-- 곁가지를 펼쳐 내용을 보여주는 것
-- 도구 병렬 호출 분기를 별도로(예: "도구 N개 동시 호출") 표시하는 것 — 지금은 완전히 숨긴다
+- 곁가지를 펼쳐 내용을 보여주는 것 — 이번 설계는 존재/개수만 다루므로, 나중에 추가해도 `BranchPoint`에 `discardedUuids`가 이미 있어 확장 지점을 새로 만들 필요가 없다
+- 도구 병렬 호출 분기를 별도로(예: "도구 N개 동시 호출") 표시하는 것 — 지금은 `isToolResultShape`로 완전히 걸러내지만, 필드 자체는 이미 `NodeIndex`에 있으므로 별도 인덱싱 변경 없이 화면 로직만 추가하면 된다
