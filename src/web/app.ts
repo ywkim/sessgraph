@@ -87,18 +87,32 @@ async function main(): Promise<void> {
   void routeFromHash(sessions);
 }
 
-function idFromHash(): string | null {
-  const match = /^#session\/(.+)$/.exec(location.hash);
-  return match ? decodeURIComponent(match[1]!) : null;
+interface HashRoute {
+  readonly sessionId: string;
+  readonly segmentRootUuid: string | null;
+}
+
+function parseHash(): HashRoute | null {
+  const match = /^#session\/([^/]+)(?:\/segment\/([^/]+))?$/.exec(
+    location.hash,
+  );
+  if (!match) return null;
+  return {
+    sessionId: decodeURIComponent(match[1]!),
+    segmentRootUuid: match[2] ? decodeURIComponent(match[2]) : null,
+  };
 }
 
 async function routeFromHash(
   sessions: readonly SessionSummary[],
 ): Promise<void> {
-  const id = idFromHash();
-  const target = id ? sessions.find((s) => s.id === id) : undefined;
-  if (target) {
+  const route = parseHash();
+  const target = route
+    ? sessions.find((s) => s.id === route.sessionId)
+    : undefined;
+  if (target && route) {
     await openSession(target, sessions);
+    if (route.segmentRootUuid) expandSegment(route.segmentRootUuid);
   } else {
     renderSessionList(sessions);
   }
@@ -560,12 +574,11 @@ function renderMatchLine(
   if (clickable && match.attribution.kind === "segment") {
     const rootUuid = match.attribution.segmentRootUuid;
     el.addEventListener("click", () => {
-      const alreadyOpen = currentSessionId === sessionId;
-      if (!alreadyOpen) {
-        location.hash = `#session/${encodeURIComponent(sessionId)}`;
+      if (currentSessionId === sessionId) {
+        expandSegment(rootUuid);
         return;
       }
-      expandSegment(rootUuid);
+      location.hash = `#session/${encodeURIComponent(sessionId)}/segment/${encodeURIComponent(rootUuid)}`;
     });
   }
 
