@@ -10,6 +10,7 @@ import { parseArgs } from "node:util";
 import { buildIndexDetailed } from "../core/build-index.js";
 import { attributeMatches, scanFile } from "../core/search.js";
 import { buildSegmentDetail } from "../core/serve.js";
+import { resolveSegmentOrigins } from "../core/segment-origin.js";
 import type {
   IndexResult,
   NodeIndex,
@@ -343,7 +344,11 @@ export function createRequestHandler(
     const { index, nodes } = fresh.state;
 
     if (rest === "/index") {
-      sendJson(res, 200, index);
+      // 응답 형태 변경 (docs/design/20260906-2000-segment-origin-backlink.tdd.md
+      // "응답 형태 변경") — 구버전 호환은 고려하지 않는다. 정적 자산과
+      // 서버가 같은 빌드에서 함께 나간다.
+      const origins = resolveSegmentOrigins(index, nodes);
+      sendJson(res, 200, { index, origins });
       return;
     }
 
