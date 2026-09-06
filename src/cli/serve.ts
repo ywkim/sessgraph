@@ -8,11 +8,15 @@ import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 
 import { buildIndexDetailed } from "../core/build-index.js";
+import { attributeMatches, scanFile } from "../core/search.js";
 import { buildSegmentDetail } from "../core/serve.js";
 import type {
   IndexResult,
   NodeIndex,
   NodeBody,
+  RawMatch,
+  SearchResult,
+  SessionSearchResult,
   SessionSummary,
 } from "../core/types.js";
 
@@ -67,6 +71,56 @@ export function isStale(
     current.size !== baseline.size ||
     current.mtimeMs !== baseline.mtimeMs
   );
+}
+
+/** Spec "성능 요구사항" — 상한이 없으면 흔한 문구 하나로 메모리가 무너진다. */
+const SEARCH_MAX_MATCHES = 1000;
+
+/**
+ * `scanFile` + `attributeMatches`를 감싸 파일 변경 감지를 더한다.
+ *
+ * `ensureFresh`는 요청 시작 시점의 인덱스만 최신으로 맞춘다. 스캔 자체는
+ * 수백 ms 걸릴 수 있어(`/body`의 단일 seek보다 넓은 창) 스캔 전후의
+ * `{ino, size, mtimeMs}`를 다시 비교한다 — 부분 결과를 정상인 것처럼
+ * 돌려주지 않는다 (Spec "파일 변경").
+ */
+function runSearch(
+  filePath: string,
+  index: IndexResult,
+  nodes: ReadonlyMap<string, NodeIndex>,
+  snapshot: FileSnapshot,
+  query: string,
+):
+  | { readonly result: SearchResult }
+  | { readonly status: number; readonly error: string } {
+  const start = performance.now();
+  let scan: {
+    readonly matches: readonly RawMatch[];
+    readonly truncated: boolean;
+  };
+  try {
+    scan = scanFile(filePath, query, SEARCH_MAX_MATCHES);
+  } catch {
+    return {
+      status: 409,
+      error: "파일이 변경되었습니다. 잠시 후 다시 시도하세요",
+    };
+  }
+  if (currentlyStale(filePath, snapshot)) {
+    return {
+      status: 409,
+      error: "파일이 변경되었습니다. 잠시 후 다시 시도하세요",
+    };
+  }
+  const matches = attributeMatches(index, nodes, scan.matches);
+  return {
+    result: {
+      query,
+      matches,
+      truncated: scan.truncated,
+      durationMs: performance.now() - start,
+    },
+  };
 }
 
 function currentlyStale(filePath: string, baseline: FileSnapshot): boolean {
@@ -222,6 +276,50 @@ export function createRequestHandler(
       return;
     }
 
+    // Spec "Interface" — /api/sessions와 같은 순서로 세션당 한 항목씩,
+    // 한 세션의 실패가 다른 세션의 결과를 지우지 않는다.
+    if (url.pathname === "/api/search") {
+      const q = url.searchParams.get("q");
+      if (!q) {
+        sendJson(res, 400, { error: "검색어가 필요합니다" });
+        return;
+      }
+      const results: SessionSearchResult[] = [];
+      for (const entry of registry.values()) {
+        const fresh = ensureFresh(entry);
+        if ("error" in fresh) {
+          results.push({
+            sessionId: entry.id,
+            result: null,
+            failure: fresh.error,
+          });
+          continue;
+        }
+        const outcome = runSearch(
+          entry.filePath,
+          fresh.state.index,
+          fresh.state.nodes,
+          fresh.state.snapshot,
+          q,
+        );
+        if ("result" in outcome) {
+          results.push({
+            sessionId: entry.id,
+            result: outcome.result,
+            failure: null,
+          });
+        } else {
+          results.push({
+            sessionId: entry.id,
+            result: null,
+            failure: outcome.error,
+          });
+        }
+      }
+      sendJson(res, 200, results);
+      return;
+    }
+
     const sessionMatch = /^\/api\/session\/([^/]+)(\/.*)$/.exec(url.pathname);
     if (!sessionMatch) {
       void serveStatic(url.pathname, res);
@@ -259,6 +357,27 @@ export function createRequestHandler(
         return;
       }
       sendJson(res, 200, detail);
+      return;
+    }
+
+    if (rest === "/search") {
+      const q = url.searchParams.get("q");
+      if (!q) {
+        sendJson(res, 400, { error: "검색어가 필요합니다" });
+        return;
+      }
+      const outcome = runSearch(
+        entry.filePath,
+        index,
+        nodes,
+        fresh.state.snapshot,
+        q,
+      );
+      if ("result" in outcome) {
+        sendJson(res, 200, outcome.result);
+      } else {
+        sendJson(res, outcome.status, { error: outcome.error });
+      }
       return;
     }
 

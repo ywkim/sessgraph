@@ -336,3 +336,57 @@ export interface SessionSummary {
   /** status가 "failed"일 때만 값을 가진다 */
   readonly failure: string | null;
 }
+
+/* ── search (docs/spec/20260906-0900-body-search.spec.md) ─────────────────── */
+
+/** 스캔 1·2단계의 산출 — 인덱스를 아직 보지 않은 상태. */
+export interface RawMatch {
+  /** 매치가 시작하는 파일 바이트 오프셋 */
+  readonly byteOffset: number;
+  /** 매치가 든 줄에서 얻은 uuid. 줄이 JSON이 아니거나 uuid가 없으면 null */
+  readonly uuid: string | null;
+  /** 매치 주변 발췌 (Spec "발췌") */
+  readonly excerpt: string;
+}
+
+/**
+ * 매치를 어느 노드에 귀속시켰는지.
+ *
+ * `unindexed`가 이 설계의 존재 이유다 — 인덱스가 의도적으로 제외한 레코드
+ * (unresolvedDuplicates 등) 안의 매치이며, 결과에서 빼지 않는다
+ * (Design "매치를 노드에 귀속시키기", ADR-0004).
+ */
+export type MatchAttribution =
+  /** uuid가 인덱스에 있고 어떤 세그먼트에 속한다 */
+  | {
+      readonly kind: "segment";
+      readonly uuid: string;
+      readonly segmentRootUuid: string;
+      readonly lineNo: number;
+    }
+  /** uuid가 인덱스에 있으나 어떤 세그먼트에도 속하지 않는다 (orphan 하위) */
+  | { readonly kind: "orphan"; readonly uuid: string; readonly lineNo: number }
+  /** 줄에 uuid가 있으나 인덱스에 없다 (중복 미해소 등) */
+  | { readonly kind: "unindexed"; readonly uuid: string }
+  /** 줄에 uuid가 없거나 줄을 해석하지 못했다 */
+  | { readonly kind: "none" };
+
+export interface SearchMatch {
+  readonly byteOffset: number;
+  readonly excerpt: string;
+  readonly attribution: MatchAttribution;
+}
+
+export interface SearchResult {
+  readonly query: string;
+  readonly matches: readonly SearchMatch[];
+  /** 매치 상한에 걸려 스캔을 중단했으면 true */
+  readonly truncated: boolean;
+  readonly durationMs: number;
+}
+
+/** `/api/search`의 항목 하나. result와 failure는 정확히 한쪽만 non-null이다 */
+export type SessionSearchResult = { readonly sessionId: string } & (
+  | { readonly result: SearchResult; readonly failure: null }
+  | { readonly result: null; readonly failure: string }
+);

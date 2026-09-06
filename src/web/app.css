@@ -353,3 +353,80 @@ button.copy {
 .back-to-sessions:hover {
   border-color: var(--muted);
 }
+
+/* 본문 검색 (docs/spec/20260906-0900-body-search.spec.md). */
+.search-form {
+  display: flex;
+  gap: var(--space-2);
+  max-width: var(--content-max);
+  margin: 0 auto var(--space-4);
+}
+
+.search-form input[type="search"] {
+  flex: 1;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  font: inherit;
+}
+
+.search-form button {
+  padding: var(--space-2) var(--space-4);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel);
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+#search-results {
+  max-width: var(--content-max);
+  margin: 0 auto var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.search-result {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.search-match {
+  display: block;
+  width: 100%;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.search-match:hover {
+  border-color: var(--muted);
+}
+
+/* 인덱스로 못 간 매치 — 클릭할 수 없되 목록에서 빼지 않는다
+   (.session-item.failed와 같은 처리, Spec "화면"). */
+.search-match.unindexed {
+  cursor: default;
+  border-style: dashed;
+  border-color: var(--cut);
+}
+
+.search-excerpt {
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  font-size: var(--font-meta);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.search-unattributed {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
