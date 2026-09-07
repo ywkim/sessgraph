@@ -575,9 +575,15 @@ function renderNode(
     </div>
     <div class="node-body">불러오는 중…</div>`;
   const bodyEl = el.querySelector<HTMLElement>(".node-body")!;
+
+  // uuid는 한 세션 안에서만 유일하므로 캐시 키도 세션으로 구분한다 —
+  // 서로 다른 세션의 같은 uuid가 조용히 섞이는 것을 막는다
+  // (docs/design/20260905-0641-multi-session-serve.tdd.md).
+  const cacheKey = `${sessionId}:${node.uuid}`;
+
   bodyEl.addEventListener("click", () => {
     if (bodyEl.classList.contains("truncated")) {
-      openBodyDialog(bodyEl.textContent || "");
+      openBodyDialog(bodyCache.get(cacheKey) || "");
     }
   });
   bodyEl.addEventListener("keydown", (e) => {
@@ -586,14 +592,9 @@ function renderNode(
       (e.key === "Enter" || e.key === " ")
     ) {
       e.preventDefault();
-      openBodyDialog(bodyEl.textContent || "");
+      openBodyDialog(bodyCache.get(cacheKey) || "");
     }
   });
-
-  // uuid는 한 세션 안에서만 유일하므로 캐시 키도 세션으로 구분한다 —
-  // 서로 다른 세션의 같은 uuid가 조용히 섞이는 것을 막는다
-  // (docs/design/20260905-0641-multi-session-serve.tdd.md).
-  const cacheKey = `${sessionId}:${node.uuid}`;
   const cached = bodyCache.get(cacheKey);
   if (cached !== undefined) {
     bodyEl.textContent = cached;

@@ -46,18 +46,18 @@ test("summarizeRaw: content가 문자열이면 300자를 넘어도 자르지 않
   assert.equal(summarizeRaw(raw).length, 400);
 });
 
-test("summarizeRaw: text 파트를 이어붙인 결과는 300자로 자른다", () => {
+test("summarizeRaw: text 파트를 이어붙인 결과는 전체를 반환한다", () => {
   const raw = JSON.stringify({
     message: { content: [{ type: "text", text: "x".repeat(400) }] },
   });
-  assert.equal(summarizeRaw(raw).length, 300);
+  assert.equal(summarizeRaw(raw).length, 400);
 });
 
-test("summarizeRaw: JSON이 아니면 원문을 300자까지 잘라 반환한다", () => {
+test("summarizeRaw: JSON이 아니면 원문을 전체 반환한다", () => {
   assert.equal(summarizeRaw("not json"), "not json");
 });
 
-test("summarizeRaw: message.content가 없으면 원문을 300자까지 잘라 반환한다", () => {
+test("summarizeRaw: message.content가 없으면 원문을 전체 반환한다", () => {
   const raw = JSON.stringify({ type: "system" });
   assert.equal(summarizeRaw(raw), raw);
 });
