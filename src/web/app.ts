@@ -22,12 +22,13 @@ import type {
 import { computeBranchLanes } from "../core/segment-branch.js";
 import { summarizeRaw, formatTime, escapeHtml } from "./format.js";
 
-// 레인 렌더링 폭 상한 — 실측(scripts/measure-branch-structure.mjs)에서
+// 레인 렌더링 개수 상한 — 실측(scripts/measure-branch-structure.mjs)에서
 // laneDepth<=4가 세션의 68%를 덮는다. 그 이상(p90=10, max=41)은 컬럼을
 // 이 값에 눌러 담아 폭 폭발을 막는다(넘치는 레인은 색이 겹치지만, 배지 텍스트
-// "곁가지 N개"가 정확한 개수는 계속 알려준다).
+// "곁가지 N개"가 정확한 개수는 계속 알려준다). 레인 하나의 실제 px 폭은
+// app.css의 --lane-width가 갖고 있다 — 좁은 화면에서 컨테이너 쿼리가 그
+// 값만 줄이면 되게 하려고 JS는 개수만 다룬다(2026-09-07).
 const LANE_CAP = 5;
-const LANE_WIDTH = 10;
 
 // .node 한 줄의 고정 높이 (가상 스크롤 계산 기준). app.css의 --row-height와
 // 값이 같아야 한다 — 행 높이를 콘텐츠·폭과 무관한 상수로 고정하는 것이
@@ -503,11 +504,13 @@ function renderLaneGutter(
             ? " lane-end"
             : ""
         : "";
-      return `<span class="lane-line ${colorClass}${edgeClass}" style="left:${lane * LANE_WIDTH}px"></span>`;
+      // 폭 자체가 아니라 "몇 번째 레인인지"만 넘긴다 — 실제 px 계산은
+      // CSS의 --lane-width로 미룬다(narrow 컨테이너 쿼리가 그 값을 줄일
+      // 수 있어야 하기 때문. 아래 renderNode의 --lane-count 주석 참고).
+      return `<span class="lane-line ${colorClass}${edgeClass}" style="left:calc(var(--lane-width) * ${lane})"></span>`;
     })
     .join("");
-  const width = (LANE_CAP + 1) * LANE_WIDTH;
-  return `<div class="lane-gutter" style="width:${width}px">${bars}</div>`;
+  return `<div class="lane-gutter">${bars}</div>`;
 }
 
 function renderNode(
@@ -522,11 +525,12 @@ function renderNode(
   el.className = "node";
   el.style.top = `${position * ROW_HEIGHT}px`;
   el.style.height = `${ROW_HEIGHT}px`;
+  // 폭(px)이 아니라 레인 "개수"만 넘긴다 — 실제 폭은 CSS의
+  // calc(--lane-count * --lane-width)가 계산한다. 폭 자체를 인라인으로
+  // 넣으면 좁은 컨테이너 쿼리의 --lane-width 축소를 인라인 스타일이 항상
+  // 이겨버려 모바일에서 .node-head가 감기는 사고가 난다(2026-09-07).
   if (activeLanes.length > 0) {
-    el.style.setProperty(
-      "--lane-gutter-width",
-      `${(LANE_CAP + 1) * LANE_WIDTH}px`,
-    );
+    el.style.setProperty("--lane-count", String(LANE_CAP + 1));
   }
   // 곁가지 표시는 존재와 개수만 알린다 — 클릭 동작 없음(Spec "화면"). 행의
   // 고정 높이를 지키기 위해 새 줄이 아니라 head 안에 배지로 얹는다.
