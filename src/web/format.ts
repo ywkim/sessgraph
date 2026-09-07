@@ -10,7 +10,7 @@ export function summarizeRaw(raw: string): string {
   try {
     parsed = JSON.parse(raw);
   } catch {
-    return raw.slice(0, 300);
+    return raw;
   }
   const content = (parsed as { message?: { content?: unknown } })?.message
     ?.content;
@@ -23,10 +23,9 @@ export function summarizeRaw(raw: string): string {
         if (part?.type === "tool_result") return "[도구 결과]";
         return `[${part?.type ?? "?"}]`;
       })
-      .join(" ")
-      .slice(0, 300);
+      .join(" ");
   }
-  return raw.slice(0, 300);
+  return raw;
 }
 
 export function formatTime(timestamp: string | null): string {
