@@ -1,5 +1,7 @@
+import { resolveSegmentBranches } from "./segment-branch.js";
 import { COMPACT_BOUNDARY } from "./types.js";
 import type {
+  BranchPoint,
   IndexResult,
   NodeIndex,
   SegmentDetail,
@@ -56,11 +58,24 @@ export function buildSegmentDetail(
     collected.sort((a, b) => a.lineNo - b.lineNo);
   }
 
+  // 이 세그먼트에 속한 부모만 남긴다 — childrenByParent는 파일 전체를
+  // 대상으로 만든 맵이라, 그대로 넘기면 다른 세그먼트의 분기까지 섞인다.
+  const collectedUuids = new Set(collected.map((n) => n.uuid));
+  const segmentChildrenByParent = new Map<string, NodeIndex[]>();
+  for (const uuid of collectedUuids) {
+    const kids = childrenByParent.get(uuid);
+    if (kids) segmentChildrenByParent.set(uuid, kids);
+  }
+  const branches: readonly BranchPoint[] = resolveSegmentBranches(
+    segmentChildrenByParent,
+  );
+
   if (segment.rootSubtype !== COMPACT_BOUNDARY) {
     // 진짜 세션 시작점 — 이을 대상이 아니다 (Spec "엣지 케이스").
     return {
       segment,
       nodes: collected,
+      branches,
       suggestedReattachCommand: null,
       suggestedParentSource: null,
     };
@@ -75,6 +90,7 @@ export function buildSegmentDetail(
     return {
       segment,
       nodes: collected,
+      branches,
       suggestedReattachCommand: null,
       suggestedParentSource: null,
     };
@@ -87,6 +103,7 @@ export function buildSegmentDetail(
   return {
     segment,
     nodes: collected,
+    branches,
     suggestedReattachCommand: command,
     suggestedParentSource: source,
   };

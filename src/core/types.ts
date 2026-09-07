@@ -65,6 +65,10 @@ export interface NodeIndex {
   readonly lineNo: number;
   readonly byteOffset: number;
   readonly byteLength: number;
+  /** 레코드의 `isSidechain` 필드. 없으면 `false` (docs/spec/20260906-1400-segment-branch-view.spec.md). */
+  readonly isSidechain: boolean;
+  /** `content[0]`이 `tool_result` 블록이면 `true`. 도구 병렬 호출 분기를 걸러내는 데만 쓴다. */
+  readonly isToolResultShape: boolean;
 }
 
 /**
@@ -301,10 +305,44 @@ export type SuggestedParentSource = "recorded" | "inferred";
  * 필드가 독립된 `string | null`/`SuggestedParentSource | null`이라 이
  * 관계를 타입 시스템이 몰랐고, 호출부가 `!`로 우회해야 했다.
  */
+/**
+ * 한 세그먼트 안에서 사용자 재실행/수정으로 갈라진 지점 하나
+ * (docs/spec/20260906-1400-segment-branch-view.spec.md).
+ */
+export interface BranchPoint {
+  readonly parentUuid: string;
+  /** DFS가 실제로 따라간 자식 — childrenByParent 배열의 마지막 원소 */
+  readonly adoptedUuid: string;
+  /** 채택되지 않은 나머지 자식 uuid들. 길이 ≥ 1 */
+  readonly discardedUuids: readonly string[];
+}
+
+/**
+ * 노드 하나가 화면의 어느 "레인"(git log --graph의 컬럼에 해당)에
+ * 그려져야 하는지 (docs/prd/20260906-1400-segment-branch-view.prd.md
+ * "레인 기반 표시"). `computeBranchLanes`가 계산한다.
+ */
+export interface BranchLane {
+  /** 0 = 채택 경로(trunk). 1 이상 = 곁가지 — 컬럼 위치이자 색상 인덱스. */
+  readonly lane: number;
+  /** 이 노드가 속한 갈래의 식별자. trunk는 "trunk" 고정값. */
+  readonly subtreeId: string;
+  /** 이 갈래가 갈라져 나온 branch point의 parentUuid. trunk는 null. */
+  readonly branchParentUuid: string | null;
+  /** 이 갈래 안에서 몇 겹 중첩되었는지. trunk=0. */
+  readonly depth: number;
+  /** 이 노드가 이 갈래(레인)에서 시간순으로 가장 처음 나온 노드인가 — 분기 시작점. */
+  readonly isSubtreeStart: boolean;
+  /** 이 노드가 이 갈래에서 시간순으로 가장 마지막 노드인가 — 이 레인이 여기서 끝난다. */
+  readonly isSubtreeEnd: boolean;
+}
+
 export type SegmentDetail = {
   readonly segment: Segment;
   /** 이 세그먼트에 속한 노드들 (root → leaf 순서). 본문은 포함하지 않는다. */
   readonly nodes: readonly NodeIndex[];
+  /** 이 세그먼트 안에서 발견된 실제 분기점 (도구 병렬 호출 노이즈 제외). */
+  readonly branches: readonly BranchPoint[];
 } & (
   | {
       readonly suggestedReattachCommand: null;

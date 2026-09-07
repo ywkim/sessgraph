@@ -19,6 +19,19 @@ interface RawOccurrence {
   readonly subtype: string | null;
   readonly timestamp: string | null;
   readonly logicalParentUuid: string | null;
+  readonly isSidechain: boolean;
+  readonly isToolResultShape: boolean;
+}
+
+/**
+ * `content` 배열의 첫 블록이 `tool_result`이면 `true`
+ * (docs/spec/20260906-1400-segment-branch-view.spec.md "인덱싱").
+ * tool_result도 `type: "user"`로 기록되므로 `type`만으로는 구분할 수 없다.
+ */
+function isToolResultShapeContent(content: unknown): boolean {
+  if (!Array.isArray(content) || content.length === 0) return false;
+  const first = content[0] as { type?: unknown } | undefined;
+  return first?.type === "tool_result";
 }
 
 /**
@@ -66,6 +79,10 @@ class IndexAccumulator {
       timestamp: typeof parsed.timestamp === "string" ? parsed.timestamp : null,
       logicalParentUuid:
         (parsed.logicalParentUuid as string | null | undefined) ?? null,
+      isSidechain: parsed.isSidechain === true,
+      isToolResultShape: isToolResultShapeContent(
+        (parsed as { message?: { content?: unknown } }).message?.content,
+      ),
     };
 
     const existing = this.occurrencesByUuid.get(uuid);
@@ -128,6 +145,8 @@ class IndexAccumulator {
         lineNo: chosen.lineNo,
         byteOffset: chosen.byteOffset,
         byteLength: chosen.byteLength,
+        isSidechain: chosen.isSidechain,
+        isToolResultShape: chosen.isToolResultShape,
       });
     }
 
