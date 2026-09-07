@@ -1,7 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { computeBranchLanes, resolveSegmentBranches } from "./segment-branch.js";
+import {
+  computeBranchLanes,
+  resolveSegmentBranches,
+} from "./segment-branch.js";
 import type { NodeIndex } from "./types.js";
 
 function node(overrides: Partial<NodeIndex> & { uuid: string }): NodeIndex {

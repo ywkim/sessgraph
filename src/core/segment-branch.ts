@@ -17,9 +17,7 @@ export function resolveSegmentBranches(
   for (const [parentUuid, children] of childrenByParent) {
     if (children.length < 2) continue;
 
-    const real = children.filter(
-      (c) => !c.isSidechain && !c.isToolResultShape,
-    );
+    const real = children.filter((c) => !c.isSidechain && !c.isToolResultShape);
     if (real.length < 2) continue; // 전부 사이드체인 또는 전부 도구 결과 — 노이즈
 
     // 채택 경로는 새로 정의하지 않는다 — DFS가 스택에 push하는 순서와
@@ -85,7 +83,11 @@ export function computeBranchLanes(
     };
   }
 
-  const trunkMeta: Meta = { subtreeId: "trunk", branchParentUuid: null, depth: 0 };
+  const trunkMeta: Meta = {
+    subtreeId: "trunk",
+    branchParentUuid: null,
+    depth: 0,
+  };
   const roots = nodes.filter(
     (n) => n.parentUuid === null || !nodeByUuid.has(n.parentUuid),
   );

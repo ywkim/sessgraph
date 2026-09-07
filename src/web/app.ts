@@ -305,9 +305,7 @@ async function loadDetail(
   if (detail.suggestedReattachCommand) {
     container.append(renderReattach(detail));
   }
-  container.append(
-    renderVirtualList(sessionId, detail.nodes, detail.branches),
-  );
+  container.append(renderVirtualList(sessionId, detail.nodes, detail.branches));
 }
 
 function renderReattach(
@@ -412,7 +410,10 @@ function computeActiveLanes(
         active.add(Math.min(r.lane, LANE_CAP));
       }
     }
-    result.set(node.uuid, [...active].sort((a, b) => a - b));
+    result.set(
+      node.uuid,
+      [...active].sort((a, b) => a - b),
+    );
   }
   return result;
 }
