@@ -379,6 +379,38 @@ button.copy {
   overflow: hidden;
 }
 
+.node-body.truncated {
+  cursor: pointer;
+  /* 잘렸음을 시각적으로 드러낸다 — 마지막 줄 아래를 배경색으로 흐리게
+     겹쳐, 텍스트가 뚝 끊긴 게 아니라 더 있다는 인상을 준다. */
+  mask-image: linear-gradient(to bottom, black 60%, transparent 100%);
+}
+
+.node-body.truncated:hover,
+.node-body.truncated:focus-visible {
+  color: var(--fg);
+}
+
+.body-dialog {
+  max-width: min(640px, 90vw);
+  max-height: 80vh;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: var(--space-3);
+}
+
+.body-dialog::backdrop {
+  background: rgb(0 0 0 / 40%);
+}
+
+.body-dialog-text {
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-y: auto;
+  max-height: calc(80vh - 4rem);
+  margin: 0 0 var(--space-2);
+}
+
 /* 세션이 둘 이상일 때만 등장하는 목록 화면
    (docs/design/20260905-0641-multi-session-serve.tdd.md). */
 .session-list {

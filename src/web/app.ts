@@ -49,6 +49,29 @@ const searchResultsEl = document.getElementById("search-results")!;
 
 const bodyCache = new Map<string, string>();
 
+// 노드마다 만들지 않고 페이지에 하나만 두고 재사용한다 — 가상 스크롤이 뷰포트
+// 밖 행을 DOM에서 지우는 것처럼, dialog도 노드마다 만들면 스크롤이 지나간
+// 뒤에도 계속 쌓인다 (docs/design/20260907-1500-node-body-full-text.tdd.md).
+const bodyDialogEl = document.createElement("dialog");
+bodyDialogEl.className = "body-dialog";
+const bodyDialogTextEl = document.createElement("pre");
+bodyDialogTextEl.className = "body-dialog-text";
+const bodyDialogCloseEl = document.createElement("button");
+bodyDialogCloseEl.className = "body-dialog-close";
+bodyDialogCloseEl.type = "button";
+bodyDialogCloseEl.autofocus = true;
+bodyDialogCloseEl.textContent = "닫기";
+bodyDialogCloseEl.addEventListener("click", () => bodyDialogEl.close());
+bodyDialogEl.append(bodyDialogTextEl, bodyDialogCloseEl);
+document.body.append(bodyDialogEl);
+
+/** 잘린 본문 미리보기의 전체 텍스트를 공용 dialog에 채우고 연다. */
+function openBodyDialog(fullText: string): void {
+  if (bodyDialogEl.open) bodyDialogEl.close();
+  bodyDialogTextEl.textContent = fullText;
+  bodyDialogEl.showModal();
+}
+
 /** 화면에 세션 목록이 떠 있으면 null — 그때 검색은 /api/search로 전 세션을 훑는다. */
 let currentSessionId: string | null = null;
 let knownSessions: readonly SessionSummary[] = [];
@@ -273,6 +296,10 @@ function renderSegment(sessionId: string, segment: Segment): HTMLElement {
   head.addEventListener("click", () => {
     body.hidden = !body.hidden;
     head.setAttribute("aria-expanded", String(!body.hidden));
+    // 세그먼트가 접히면 그 안의 .node-body가 화면에서 사라지므로, 열려
+    // 있던 dialog가 있다면 원본을 잃은 채 떠 있지 않게 닫는다
+    // (docs/design/20260907-1500-node-body-full-text.tdd.md).
+    if (body.hidden && bodyDialogEl.open) bodyDialogEl.close();
     if (!body.hidden && !loaded) {
       loaded = true;
       void loadDetail(sessionId, segment.rootUuid, body);
@@ -548,6 +575,20 @@ function renderNode(
     </div>
     <div class="node-body">불러오는 중…</div>`;
   const bodyEl = el.querySelector<HTMLElement>(".node-body")!;
+  bodyEl.addEventListener("click", () => {
+    if (bodyEl.classList.contains("truncated")) {
+      openBodyDialog(bodyEl.textContent || "");
+    }
+  });
+  bodyEl.addEventListener("keydown", (e) => {
+    if (
+      bodyEl.classList.contains("truncated") &&
+      (e.key === "Enter" || e.key === " ")
+    ) {
+      e.preventDefault();
+      openBodyDialog(bodyEl.textContent || "");
+    }
+  });
 
   // uuid는 한 세션 안에서만 유일하므로 캐시 키도 세션으로 구분한다 —
   // 서로 다른 세션의 같은 uuid가 조용히 섞이는 것을 막는다
@@ -556,6 +597,7 @@ function renderNode(
   const cached = bodyCache.get(cacheKey);
   if (cached !== undefined) {
     bodyEl.textContent = cached;
+    markIfTruncated(bodyEl);
     return el;
   }
 
@@ -566,6 +608,7 @@ function renderNode(
       const text = summarizeRaw(body.raw);
       bodyCache.set(cacheKey, text);
       bodyEl.textContent = text;
+      markIfTruncated(bodyEl);
     })
     .catch((err: unknown) => {
       const error = err as HttpError;
@@ -574,6 +617,24 @@ function renderNode(
     });
 
   return el;
+}
+
+/** scrollHeight/clientHeight는 레이아웃이 끝난 뒤에만 정확하므로 다음
+ * 프레임에서 판정한다 (docs/design/20260907-1500-node-body-full-text.tdd.md). */
+function markIfTruncated(bodyEl: HTMLElement): void {
+  requestAnimationFrame(() => {
+    if (bodyEl.scrollHeight > bodyEl.clientHeight) {
+      bodyEl.classList.add("truncated");
+      bodyEl.setAttribute("role", "button");
+      bodyEl.setAttribute("tabindex", "0");
+      bodyEl.setAttribute("aria-label", "본문 전체 보기");
+    } else {
+      bodyEl.classList.remove("truncated");
+      bodyEl.removeAttribute("role");
+      bodyEl.removeAttribute("tabindex");
+      bodyEl.removeAttribute("aria-label");
+    }
+  });
 }
 
 /** 세션이 열려 있으면 그 안에서만, 목록 화면이면 전 세션에서 찾는다. */
