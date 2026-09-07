@@ -317,6 +317,26 @@ export interface BranchPoint {
   readonly discardedUuids: readonly string[];
 }
 
+/**
+ * 노드 하나가 화면의 어느 "레인"(git log --graph의 컬럼에 해당)에
+ * 그려져야 하는지 (docs/prd/20260906-1400-segment-branch-view.prd.md
+ * "레인 기반 표시"). `computeBranchLanes`가 계산한다.
+ */
+export interface BranchLane {
+  /** 0 = 채택 경로(trunk). 1 이상 = 곁가지 — 컬럼 위치이자 색상 인덱스. */
+  readonly lane: number;
+  /** 이 노드가 속한 갈래의 식별자. trunk는 "trunk" 고정값. */
+  readonly subtreeId: string;
+  /** 이 갈래가 갈라져 나온 branch point의 parentUuid. trunk는 null. */
+  readonly branchParentUuid: string | null;
+  /** 이 갈래 안에서 몇 겹 중첩되었는지. trunk=0. */
+  readonly depth: number;
+  /** 이 노드가 이 갈래(레인)에서 시간순으로 가장 처음 나온 노드인가 — 분기 시작점. */
+  readonly isSubtreeStart: boolean;
+  /** 이 노드가 이 갈래에서 시간순으로 가장 마지막 노드인가 — 이 레인이 여기서 끝난다. */
+  readonly isSubtreeEnd: boolean;
+}
+
 export type SegmentDetail = {
   readonly segment: Segment;
   /** 이 세그먼트에 속한 노드들 (root → leaf 순서). 본문은 포함하지 않는다. */

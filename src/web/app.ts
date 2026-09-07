@@ -7,6 +7,7 @@
 // 잡아준다"를 웹 경계까지 적용).
 
 import type {
+  BranchLane,
   BranchPoint,
   IndexResult,
   NodeIndex,
@@ -18,7 +19,15 @@ import type {
   SessionSearchResult,
   SessionSummary,
 } from "../core/types.js";
+import { computeBranchLanes } from "../core/segment-branch.js";
 import { summarizeRaw, formatTime, escapeHtml } from "./format.js";
+
+// 레인 렌더링 폭 상한 — 실측(scripts/measure-branch-structure.mjs)에서
+// laneDepth<=4가 세션의 68%를 덮는다. 그 이상(p90=10, max=41)은 컬럼을
+// 이 값에 눌러 담아 폭 폭발을 막는다(넘치는 레인은 색이 겹치지만, 배지 텍스트
+// "곁가지 N개"가 정확한 개수는 계속 알려준다).
+const LANE_CAP = 5;
+const LANE_WIDTH = 10;
 
 // .node 한 줄의 고정 높이 (가상 스크롤 계산 기준). app.css의 --row-height와
 // 값이 같아야 한다 — 행 높이를 콘텐츠·폭과 무관한 상수로 고정하는 것이
@@ -348,6 +357,65 @@ function renderReattach(
  * 노드 수가 수천 개여도 화면에 보이는 것만 DOM에 올린다. 본문은 그 행이
  * 실제로 보일 때 `/api/body`로 한 줄씩 가져온다.
  */
+/** computeBranchLanes가 필요로 하는 부모→자식 맵을 세그먼트 노드만으로 다시 만든다. */
+function buildChildrenByParent(
+  nodes: readonly NodeIndex[],
+): Map<string, NodeIndex[]> {
+  const map = new Map<string, NodeIndex[]>();
+  for (const node of nodes) {
+    if (node.parentUuid === null) continue;
+    const siblings = map.get(node.parentUuid);
+    if (siblings) siblings.push(node);
+    else map.set(node.parentUuid, [node]);
+  }
+  return map;
+}
+
+/**
+ * 각 행에서 "지금 열려 있는" 레인 목록을 구한다 — 자기 갈래뿐 아니라 같은
+ * 시간대에 겹치는 다른 갈래도 배경 세로선으로 계속 그려야 git 그래프처럼
+ * 끊기지 않는다.
+ */
+function computeActiveLanes(
+  nodes: readonly NodeIndex[],
+  laneByUuid: ReadonlyMap<string, BranchLane>,
+): ReadonlyMap<string, readonly number[]> {
+  const rangeBySubtree = new Map<
+    string,
+    { lane: number; start: number; end: number }
+  >();
+  for (const node of nodes) {
+    const l = laneByUuid.get(node.uuid);
+    if (!l) continue;
+    const r = rangeBySubtree.get(l.subtreeId);
+    if (!r) {
+      rangeBySubtree.set(l.subtreeId, {
+        lane: l.lane,
+        start: node.lineNo,
+        end: node.lineNo,
+      });
+    } else {
+      if (node.lineNo < r.start) r.start = node.lineNo;
+      if (node.lineNo > r.end) r.end = node.lineNo;
+    }
+  }
+  // trunk(lane 0)은 항상 존재해 모든 행에 걸쳐 있으므로 선으로 그리지 않는다 —
+  // 곁가지가 하나도 없는 절대다수 세션(실측 71.6%)에서 거터가 안 나타나야
+  // 지금까지의 화면과 다를 게 없다.
+  const ranges = [...rangeBySubtree.values()].filter((r) => r.lane > 0);
+  const result = new Map<string, readonly number[]>();
+  for (const node of nodes) {
+    const active = new Set<number>();
+    for (const r of ranges) {
+      if (r.start <= node.lineNo && node.lineNo <= r.end) {
+        active.add(Math.min(r.lane, LANE_CAP));
+      }
+    }
+    result.set(node.uuid, [...active].sort((a, b) => a - b));
+  }
+  return result;
+}
+
 function renderVirtualList(
   sessionId: string,
   nodes: readonly NodeIndex[],
@@ -355,6 +423,13 @@ function renderVirtualList(
 ): HTMLElement {
   const branchByParent = new Map<string, BranchPoint>();
   for (const b of branches) branchByParent.set(b.parentUuid, b);
+
+  const laneByUuid = computeBranchLanes(
+    nodes,
+    buildChildrenByParent(nodes),
+    branches,
+  );
+  const activeLanesByUuid = computeActiveLanes(nodes, laneByUuid);
 
   const viewport = document.createElement("div");
   viewport.className = "viewport";
@@ -384,11 +459,14 @@ function renderVirtualList(
     }
     for (let i = first; i <= last; i++) {
       if (mounted.has(i)) continue;
+      const node = nodes[i]!;
       const el = renderNode(
         sessionId,
-        nodes[i]!,
+        node,
         i,
-        branchByParent.get(nodes[i]!.uuid),
+        branchByParent.get(node.uuid),
+        laneByUuid.get(node.uuid),
+        activeLanesByUuid.get(node.uuid) ?? [],
       );
       mounted.set(i, el);
       spacer.append(el);
@@ -402,22 +480,61 @@ function renderVirtualList(
   return viewport;
 }
 
+/**
+ * 레인 거터 HTML을 만든다 — git log --graph 컬럼처럼, 이 행에서 열려 있는
+ * 모든 레인을 세로선으로 그리고, 이 노드 자신의 갈래가 여기서 시작/끝나면
+ * 그 레인만 반쪽 선(위/아래)으로 끊어 범위를 드러낸다
+ * (docs/prd/20260906-1400-segment-branch-view.prd.md "레인 기반 표시").
+ */
+function renderLaneGutter(
+  ownLane: BranchLane | undefined,
+  activeLanes: readonly number[],
+): string {
+  if (activeLanes.length === 0) return "";
+  const clampedOwn = ownLane ? Math.min(ownLane.lane, LANE_CAP) : -1;
+  const bars = activeLanes
+    .map((lane) => {
+      const colorClass = `lane-c${lane % 6}`;
+      const isOwn = lane === clampedOwn;
+      const edgeClass = isOwn
+        ? ownLane!.isSubtreeStart
+          ? " lane-start"
+          : ownLane!.isSubtreeEnd
+            ? " lane-end"
+            : ""
+        : "";
+      return `<span class="lane-line ${colorClass}${edgeClass}" style="left:${lane * LANE_WIDTH}px"></span>`;
+    })
+    .join("");
+  const width = (LANE_CAP + 1) * LANE_WIDTH;
+  return `<div class="lane-gutter" style="width:${width}px">${bars}</div>`;
+}
+
 function renderNode(
   sessionId: string,
   node: NodeIndex,
   position: number,
   branch: BranchPoint | undefined,
+  ownLane: BranchLane | undefined,
+  activeLanes: readonly number[],
 ): HTMLElement {
   const el = document.createElement("div");
   el.className = "node";
   el.style.top = `${position * ROW_HEIGHT}px`;
   el.style.height = `${ROW_HEIGHT}px`;
+  if (activeLanes.length > 0) {
+    el.style.setProperty(
+      "--lane-gutter-width",
+      `${(LANE_CAP + 1) * LANE_WIDTH}px`,
+    );
+  }
   // 곁가지 표시는 존재와 개수만 알린다 — 클릭 동작 없음(Spec "화면"). 행의
   // 고정 높이를 지키기 위해 새 줄이 아니라 head 안에 배지로 얹는다.
   const branchBadge = branch
     ? `<span class="branch muted">곁가지 ${branch.discardedUuids.length}개(재실행/수정)</span>`
     : "";
   el.innerHTML = `
+    ${renderLaneGutter(ownLane, activeLanes)}
     <div class="node-head">
       <span class="node-type">${escapeHtml(node.subtype ?? node.type)}</span>
       <span class="uuid grow">${escapeHtml(node.uuid)}</span>

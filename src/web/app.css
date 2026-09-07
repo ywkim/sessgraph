@@ -27,6 +27,10 @@
   --node-body-indent: 80px;
   --uuid-max-width: none;
   --viewport-height: 420px;
+
+  /* 곁가지가 있는 행에서만 JS가 이 값을 인라인으로 채운다. 기본 0이라
+     분기 없는 절대다수 세션은 지금까지와 화면이 똑같다. */
+  --lane-gutter-width: 0px;
 }
 
 * {
@@ -260,9 +264,71 @@ button.copy {
   position: absolute;
   left: 0;
   right: 0;
-  padding: 6px 12px;
+  padding: 6px 12px 6px calc(12px + var(--lane-gutter-width));
   border-bottom: 1px solid #f0f0f2;
   overflow: hidden;
+}
+
+/* 레인 거터 — git log --graph 컬럼처럼, 이 행 시점에 열려 있는 곁가지들을
+   세로선으로 그린다(docs/prd/20260906-1400-segment-branch-view.prd.md
+   "레인 기반 표시"). 절대 위치라 .node의 고정 --row-height를 건드리지
+   않는다. 폭은 --lane-gutter-width로만 바뀌므로, 곁가지 없는 행은 이 div
+   자체가 없어 지금까지와 동일하다. */
+.lane-gutter {
+  position: absolute;
+  left: 12px;
+  top: 0;
+  bottom: 0;
+  pointer-events: none;
+}
+
+.lane-line {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  border-radius: 1px;
+}
+
+/* 갈래가 이 행에서 시작한다 — 위쪽 절반은 비우고 아래로만 선을 그어
+   "여기서 갈라져 나왔다"는 경계를 드러낸다. */
+.lane-line.lane-start {
+  top: 50%;
+}
+
+/* 갈래가 이 행에서 끝난다 — 아래쪽 절반을 비운다. */
+.lane-line.lane-end {
+  bottom: 50%;
+}
+
+.lane-line.lane-start::before {
+  content: "";
+  position: absolute;
+  top: -3px;
+  left: -2px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: inherit;
+}
+
+.lane-c0 {
+  background: #2f8f4e;
+}
+.lane-c1 {
+  background: var(--cut);
+}
+.lane-c2 {
+  background: #3a6fd8;
+}
+.lane-c3 {
+  background: #a04fc9;
+}
+.lane-c4 {
+  background: #c98a1f;
+}
+.lane-c5 {
+  background: #1fa5a5;
 }
 
 .node-head {

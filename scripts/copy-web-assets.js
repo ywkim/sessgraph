@@ -7,9 +7,14 @@
  * `app.ts`는 `import type`으로 `src/core/types.ts`를 참조한다(ADR-0001 —
  * 웹도 TypeScript 컴파일러 검증을 거친다). 그 때문에 `tsconfig.web.json`의
  * rootDir는 `src` 전체가 되고, 컴파일 산출물은 `dist/.web-build/web/*.js`
- * 형태로 나온다(core/types.js도 함께 나오지만 런타임에 필요 없다 — `import
- * type`은 완전히 소거되므로 실제로 그걸 import하는 산출물은 없다). 여기서
- * `web/` 아래 파일만 꺼내 옮기고 임시 디렉터리는 지운다.
+ * 형태로 나온다. `web/` 아래 파일만 꺼내 옮기고 임시 디렉터리는 지운다.
+ *
+ * `app.ts`는 레인 계산(`computeBranchLanes`)을 값으로도 import한다 —
+ * `import type`과 달리 컴파일이 소거하지 않고 실제 `import` 문이 산출물에
+ * 남는다. 브라우저가 `../core/segment-branch.js`를 상대경로로 요청하므로,
+ * `dist/.web-build/core/*.js`도 `dist/web/core/`에 같은 상대 위치로
+ * 옮겨야 한다 — 안 옮기면 정적 서버가 404를 내고 화면이 "읽는 중…"에서
+ * 멈춘다(2026-09-07 레인 뷰 도입 때 실제로 겪음).
  *
  * `serve` 명령이 `dist/cli/serve.js` 기준 상대 경로로 자산을 읽으므로
  * (설치된 패키지에서 `src/`가 없을 수 있다) 빌드 시점에 복사해 둔다.
@@ -53,6 +58,15 @@ cpSync(webBuild, testsTo, {
   recursive: true,
   filter: (src) => !src.endsWith(".map"),
 });
+
+// app.ts가 값으로 import하는 core 모듈 — web/app.js의 "../core/..." 상대
+// 경로가 풀리도록 dist/web/core/에 같은 모양으로 둔다.
+const coreBuild = path.join(root, "dist", ".web-build", "core");
+cpSync(coreBuild, path.join(to, "core"), {
+  recursive: true,
+  filter: (src) => !src.endsWith(".map") && !src.endsWith(".test.js"),
+});
+
 rmSync(path.join(root, "dist", ".web-build"), {
   recursive: true,
   force: true,
