@@ -577,7 +577,7 @@ function renderNode(
   const bodyEl = el.querySelector<HTMLElement>(".node-body")!;
   bodyEl.addEventListener("click", () => {
     if (bodyEl.classList.contains("truncated")) {
-      openBodyDialog(bodyEl.textContent!);
+      openBodyDialog(bodyEl.textContent || "");
     }
   });
   bodyEl.addEventListener("keydown", (e) => {
@@ -586,7 +586,7 @@ function renderNode(
       (e.key === "Enter" || e.key === " ")
     ) {
       e.preventDefault();
-      openBodyDialog(bodyEl.textContent!);
+      openBodyDialog(bodyEl.textContent || "");
     }
   });
 
