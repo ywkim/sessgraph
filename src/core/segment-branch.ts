@@ -23,7 +23,10 @@ export function resolveSegmentBranches(
     // 채택 경로는 새로 정의하지 않는다 — DFS가 스택에 push하는 순서와
     // 같은 배열의 마지막 원소를 그대로 채택 경로로 인정한다
     // (docs/design/20260906-1400-segment-branch-view.tdd.md "채택 경로는 새로 정의하지 않는다").
-    const adopted = children[children.length - 1]!;
+    // 단, `children`의 마지막 원소가 노이즈(도구 호출/사이드체인)일 수 있다 —
+    // 그러면 real 갈래 중 어느 것도 "채택"이 아닌 채 전부 곁가지로 몰리게
+    // 되므로, 마지막 real 원소를 채택 경로로 삼는다.
+    const adopted = real[real.length - 1]!;
     const discarded = real
       .filter((c) => c.uuid !== adopted.uuid)
       .map((c) => c.uuid);

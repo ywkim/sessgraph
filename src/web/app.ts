@@ -498,12 +498,12 @@ function renderLaneGutter(
     .map((lane) => {
       const colorClass = `lane-c${lane % 6}`;
       const isOwn = lane === clampedOwn;
+      // 리프 노드(한 줄짜리 곁가지)는 start와 end가 같은 행 — 두 클래스를
+      // 함께 붙여 위/아래 반쪽을 모두 비우고 시작점 동그라미만 남긴다
+      // (2026-09-07 PR #53 리뷰에서 lane-start만 적용되던 문제 확인).
       const edgeClass = isOwn
-        ? ownLane!.isSubtreeStart
-          ? " lane-start"
-          : ownLane!.isSubtreeEnd
-            ? " lane-end"
-            : ""
+        ? (ownLane!.isSubtreeStart ? " lane-start" : "") +
+          (ownLane!.isSubtreeEnd ? " lane-end" : "")
         : "";
       // 폭 자체가 아니라 "몇 번째 레인인지"만 넘긴다 — 실제 px 계산은
       // CSS의 --lane-width로 미룬다(narrow 컨테이너 쿼리가 그 값을 줄일

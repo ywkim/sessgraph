@@ -51,6 +51,19 @@ test("resolveSegmentBranches: 자식이 전부 sidechain이면 만들지 않는�
   assert.deepEqual(resolveSegmentBranches(childrenByParent), []);
 });
 
+test("resolveSegmentBranches: children 배열의 마지막이 노이즈여도 real 중 마지막을 채택한다", () => {
+  const a = node({ uuid: "a" }); // real
+  const b = node({ uuid: "b" }); // real, 채택돼야 함
+  const c = node({ uuid: "c", isToolResultShape: true }); // children 배열상 마지막이지만 노이즈
+  const childrenByParent = new Map([["p", [a, b, c]]]);
+
+  const branches = resolveSegmentBranches(childrenByParent);
+
+  assert.equal(branches.length, 1);
+  assert.equal(branches[0]!.adoptedUuid, "b"); // real의 마지막, children 전체의 마지막(c)이 아님
+  assert.deepEqual(branches[0]!.discardedUuids, ["a"]); // 노이즈(c)는 discarded에도 안 들어감
+});
+
 test("resolveSegmentBranches: 자식이 2개미만이면 만들지 않는다", () => {
   const a = node({ uuid: "a" });
   const childrenByParent = new Map([["p", [a]]]);

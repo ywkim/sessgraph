@@ -3,7 +3,7 @@ slug: 20260906-1400-segment-branch-view
 status: Current
 related:
   prd: docs/prd/20260906-1400-segment-branch-view.prd.md
-updated: 2026-09-06
+updated: 2026-09-07
 ---
 
 # Technical Design: 세그먼트 내부 분기 표시
@@ -31,8 +31,27 @@ src/core/segment-branch.ts (신규)
   → buildSegmentDetail이 만드는 childrenByParent를 재사용
 
 src/web: 조각을 펼쳤을 때, 진짜 분기가 있는 부모 노드 아래에
-  "곁가지 N개(재실행/수정)" 한 줄만 표시. 노이즈 분기는 아무 표시도 하지 않는다
+  "곁가지 N개(재실행/수정)" 배지를 표시. 노이즈 분기는 아무 표시도 하지 않는다
+  + 레인 거터(아래 "레인 기반 표시" 참고) — 배지만으로는 갈래 자체(소속·
+    중첩·시작/끝 범위)가 안 보인다는 재피드백(2026-09-07)으로 추가
 ```
+
+### 레인 기반 표시 (2026-09-07 재피드백 반영)
+
+배지 "곁가지 N개"는 분기점의 **존재**는 알리지만, 곁가지가 어느 분기점 소속인지·몇 겹 중첩됐는지·어디서 시작해 어디서 끝나는지는 알려주지 않는다. `git log --graph`가 브랜치를 컬럼(레인)으로 그리는 것과 같은 방식으로, 세로 타임라인 고정 배치(Non-Goals가 지킨 제약) **안에서** 각 행 왼쪽에 레인 거터를 추가한다.
+
+```
+src/core/segment-branch.ts
+  computeBranchLanes(nodes, childrenByParent, branches): ReadonlyMap<uuid, BranchLane>
+```
+
+세 단계로 계산한다:
+
+1. **갈래(subtree) 식별** — 루트에서 DFS. 채택 경로(`BranchPoint.adoptedUuid`)와 노이즈 자식은 부모의 갈래를 그대로 물려받고, `discardedUuids`에 속한 자식만 새 갈래(`subtreeId`)로 갈라진다. 중첩된 분기점은 그 갈래 안에서 또 새 갈래를 만들어 `depth`가 늘어난다
+2. **갈래별 lineNo 범위** — 그 갈래에 속한 노드들의 최소/최대 `lineNo`가 "이 갈래의 시작과 끝"이다
+3. **레인 배정 (interval graph coloring)** — trunk(채택 경로)는 항상 레인 0. 나머지는 lineNo 구간이 겹치지 않는 갈래끼리 레인 번호를 재사용한다(`git log --graph`의 컬럼 재사용과 같은 원리). 실측한 "동시 open 브랜치 수"(중앙값 3, p90 10, p99 21)가 그대로 이 레인 개수가 된다 — 원시 트리 깊이가 아니라 겹치는 구간 개수만큼만 늘어난다
+
+`src/web`은 레인 개수 상한(`LANE_CAP = 5`, 실측 laneDepth 기준)을 두어 폭 폭발을 막는다. 상한을 넘는 레인은 `lane % 6` 색상 로테이션이 겹칠 수 있지만, 배지 텍스트의 곁가지 개수는 항상 정확하다. 가상 스크롤을 지탱하는 고정 `--row-height`는 변경하지 않는다 — 레인 거터는 각 행 안에 절대 위치로 그려질 뿐이다. 폭이 좁은 화면(`@container node-list (max-width: 480px)`)에서는 레인 하나의 픽셀 폭(`--lane-width`)만 줄여 대응한다 — 폭 자체를 JS가 인라인으로 계산해 넣으면 컨테이너 쿼리가 그 값을 못 이기는 문제가 있어(2026-09-07 실제로 겪음), JS는 레인 "개수"(`--lane-count`)만 인라인으로 넘기고 실제 px 계산은 CSS `calc()`에 맡긴다.
 
 ## 데이터 흐름
 
@@ -81,6 +100,8 @@ readonly isToolResultShape: boolean;
 ### 채택 경로는 새로 정의하지 않는다
 
 `buildSegmentDetail`의 DFS는 `childrenByParent.get(current.uuid)`가 반환한 배열을 스택에 그대로 push한다 — 즉 **가장 마지막에 등장한 자식이 스택 맨 위**라 먼저 pop되어 앞쪽에 나열된다(자바스크립트 배열 push/pop 순서. lineNo 정렬 전 임시 순서일 뿐이지만, 실질적으로는 파일에 나중에 쓰인 자식이 우선). 이 순서를 "채택 경로"로 그대로 인정한다 — PRD Non-Goals가 명시했듯 더 나은 채택 기준이 필요한지는 확인되지 않았다. 나머지 자식은 전부 "곁가지"로 묶는다.
+
+다만 `resolveSegmentBranches`가 실제로 "채택"으로 표시하는 `adoptedUuid`는 `children`(전체) 배열이 아니라 `real`(노이즈 제외) 배열의 마지막 원소다 — `children`의 마지막이 도구 호출/사이드체인이면 어떤 real 자식도 `adoptedUuid`와 일치하지 않아 전부 곁가지로 잘못 분류되는 버그가 있었다(2026-09-07 PR #53 리뷰에서 확인, 수정). 노이즈 자식은 애초에 `discardedUuids`(재실행/수정 갈래)에도 포함되지 않으므로, 이 정정이 노이즈 판정 자체에는 영향을 주지 않는다.
 
 ### 성능/리스크
 

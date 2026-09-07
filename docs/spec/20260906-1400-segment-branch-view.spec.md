@@ -4,7 +4,7 @@ status: Current
 related:
   prd: docs/prd/20260906-1400-segment-branch-view.prd.md
   design: docs/design/20260906-1400-segment-branch-view.tdd.md
-updated: 2026-09-06
+updated: 2026-09-07
 ---
 
 # Spec: 세그먼트 내부 분기 표시
@@ -30,9 +30,12 @@ readonly isToolResultShape: boolean;
 ```ts
 export interface BranchPoint {
   readonly parentUuid: string;
-  /** DFS가 실제로 따라간 자식 — childrenByParent 배열의 마지막 원소 */
+  /** 채택 경로 — real(노이즈 제외) 자식 배열의 마지막 원소.
+   *  children(전체) 배열의 마지막이 아니다: 그게 노이즈(도구 호출/
+   *  사이드체인)면 real 중 어느 것도 채택으로 안 잡히는 버그가 있었다
+   *  (2026-09-07 수정). */
   readonly adoptedUuid: string;
-  /** 채택되지 않은 나머지 자식 uuid들. 길이 ≥ 1 */
+  /** 채택되지 않은 나머지 real 자식 uuid들. 길이 ≥ 1 */
   readonly discardedUuids: readonly string[];
 }
 
@@ -43,6 +46,27 @@ export interface BranchPoint {
 export function resolveSegmentBranches(
   childrenByParent: ReadonlyMap<string, NodeIndex[]>,
 ): readonly BranchPoint[];
+
+/**
+ * 각 노드가 화면의 어느 레인(git log --graph 컬럼)에 그려질지 계산한다
+ * (2026-09-07 재피드백 — 배지만으로는 갈래 소속/중첩/범위가 안 보임).
+ * trunk(채택 경로)는 항상 레인 0. 곁가지는 lineNo 구간이 겹치지 않으면
+ * 레인을 재사용한다(interval graph coloring).
+ */
+export interface BranchLane {
+  readonly lane: number; // 0 = trunk, 1 이상 = 곁가지
+  readonly subtreeId: string;
+  readonly branchParentUuid: string | null;
+  readonly depth: number; // 중첩 깊이
+  readonly isSubtreeStart: boolean; // 이 갈래가 이 행에서 시작
+  readonly isSubtreeEnd: boolean; // 이 갈래가 이 행에서 끝남
+}
+
+export function computeBranchLanes(
+  nodes: readonly NodeIndex[],
+  childrenByParent: ReadonlyMap<string, readonly NodeIndex[]>,
+  branches: readonly BranchPoint[],
+): ReadonlyMap<string, BranchLane>;
 ```
 
 ### HTTP 엔드포인트
@@ -65,7 +89,8 @@ export interface SegmentDetail {
 - `resolveSegmentBranches`가 반환하는 각 `BranchPoint`에서 `discardedUuids.length >= 1`이다 — 자식이 2개 미만인 부모는 애초에 포함되지 않는다
 - 한 부모의 자식이 전부 `isSidechain === true` 또는 전부 `isToolResultShape === true`이면 `BranchPoint`를 만들지 않는다 (도구 병렬 호출 노이즈)
 - 자식 중 `isSidechain`도 `isToolResultShape`도 아닌 것이 2개 이상이면 `BranchPoint`를 만든다. 나머지(사이드체인/도구 결과인 자식)는 `discardedUuids`에 포함하지 않는다 — 애초에 "재실행/수정 갈래"가 아니므로 곁가지로 취급하지 않는다
-- `adoptedUuid`는 `childrenByParent.get(parentUuid)` 배열의 **마지막 원소**다 (`buildSegmentDetail`의 DFS가 실제로 따라가는 자식, [Design](../design/20260906-1400-segment-branch-view.tdd.md) "채택 경로는 새로 정의하지 않는다")
+- `adoptedUuid`는 `childrenByParent.get(parentUuid)`에서 `isSidechain`/`isToolResultShape`가 아닌(real) 자식만 걸러낸 배열의 **마지막 원소**다 — `children`(전체) 배열의 마지막이 아니다 (`buildSegmentDetail`의 DFS 순서를 real 자식에 한해 그대로 인정, [Design](../design/20260906-1400-segment-branch-view.tdd.md) "채택 경로는 새로 정의하지 않는다")
+- `computeBranchLanes`가 반환하는 `BranchLane.lane`은 trunk(채택 경로에 속한 노드)일 때 항상 `0`이다. 리프 갈래(한 줄짜리 곁가지)는 `isSubtreeStart`와 `isSubtreeEnd`가 동시에 `true`다 — 화면은 이 경우 위/아래 반쪽선을 모두 비우고 시작점 동그라미만 그린다(양쪽 클래스를 함께 적용, "lane-start만 적용되던" 버그 2026-09-07 수정)
 - `BranchPoint[]`의 순서는 정의하지 않는다 — 화면은 이 배열을 부모 위치(`lineNo`) 기준으로 다시 정렬해 쓴다
 
 ## 엣지 케이스 & 에러 처리
@@ -81,6 +106,16 @@ export interface SegmentDetail {
 - 곁가지가 있는 부모 노드 아래에 "곁가지 {discardedUuids.length}개(재실행/수정)"를 표시한다. 클릭 동작은 이번 범위에 없다(PRD Non-Goals) — 존재를 알리는 것까지다
 - 곁가지 표시는 세그먼트를 펼쳤을 때만 계산·렌더한다. 조각 목록(펼치기 전)에는 표시하지 않는다 — 목록 단위 표시는 [조각 출처 백링크](20260906-2000-segment-origin-backlink.spec.md)의 범위이지 이 기능의 범위가 아니다
 - `branches`가 빈 배열이면 아무것도 표시하지 않는다. 빈 상태를 알리는 문구를 넣지 않는다 — 대부분의 세그먼트는 분기가 없는 게 정상이라, 매번 "분기 없음"을 보여주면 노이즈다
+
+**레인 거터 (2026-09-07 재피드백)**
+
+- `.lane-gutter`: 각 `.node` 행 왼쪽에 절대 위치로 그리는 거터 컨테이너. 그 행에서 열려 있는(구간이 이 행의 lineNo를 포함하는) 모든 레인을 `.lane-line`으로 그린다. 폭은 `calc(var(--lane-count, 0) * var(--lane-width))` — trunk(레인 0)만 있는 행(분기 없는 세그먼트)은 `--lane-count`가 없어 폭 0, 기존 화면과 동일
+- `.lane-line`: 레인 하나의 세로선. `lane % 6`로 `.lane-c0`~`.lane-c5` 중 하나를 받아 색을 로테이션한다(레인 6개 넘으면 색 겹침 — 배지 개수 텍스트는 항상 정확하므로 데이터 손실은 아님)
+- `.lane-line.lane-start`: 그 갈래가 이 행에서 시작 — 위쪽 절반을 비우고 시작점에 동그라미(`::before`)를 그린다
+- `.lane-line.lane-end`: 그 갈래가 이 행에서 끝남 — 아래쪽 절반을 비운다
+- 리프(한 줄짜리 곁가지, `isSubtreeStart && isSubtreeEnd`): `lane-start`와 `lane-end`를 함께 적용 — 위/아래 모두 비어 시작점 동그라미만 남는다
+- `LANE_CAP = 5`: 레인 개수 상한. 실측 laneDepth(중앙값 3, p90 10, p99 21, 최대 41)에서 laneDepth≤4가 세션의 68%를 덮는다는 근거로 정했다 — 그 이상은 색이 겹치되 개수는 배지가 계속 알려준다
+- 좁은 화면(`@container node-list (max-width: 480px)`)은 `--lane-width`를 10px→5px로 줄인다. JS는 레인 "개수"(`--lane-count`)만 인라인 스타일로 넘기고 픽셀 폭은 CSS `calc()`가 계산한다 — 폭 자체를 인라인으로 넣으면 컨테이너 쿼리의 `--lane-width` 축소를 인라인 스타일이 항상 이겨버려 모바일에서 `.node-head`가 감기는 사고가 난다(2026-09-07 실제로 겪고 수정)
 
 ## 성능 요구사항
 
