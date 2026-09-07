@@ -296,6 +296,10 @@ function renderSegment(sessionId: string, segment: Segment): HTMLElement {
   head.addEventListener("click", () => {
     body.hidden = !body.hidden;
     head.setAttribute("aria-expanded", String(!body.hidden));
+    // 세그먼트가 접히면 그 안의 .node-body가 화면에서 사라지므로, 열려
+    // 있던 dialog가 있다면 원본을 잃은 채 떠 있지 않게 닫는다
+    // (docs/design/20260907-1500-node-body-full-text.tdd.md).
+    if (body.hidden && bodyDialogEl.open) bodyDialogEl.close();
     if (!body.hidden && !loaded) {
       loaded = true;
       void loadDetail(sessionId, segment.rootUuid, body);
@@ -572,18 +576,17 @@ function renderNode(
     <div class="node-body">불러오는 중…</div>`;
   const bodyEl = el.querySelector<HTMLElement>(".node-body")!;
   bodyEl.addEventListener("click", () => {
-    if (bodyEl.classList.contains("truncated") && bodyEl.textContent) {
-      openBodyDialog(bodyEl.textContent);
+    if (bodyEl.classList.contains("truncated")) {
+      openBodyDialog(bodyEl.textContent!);
     }
   });
   bodyEl.addEventListener("keydown", (e) => {
     if (
       bodyEl.classList.contains("truncated") &&
-      (e.key === "Enter" || e.key === " ") &&
-      bodyEl.textContent
+      (e.key === "Enter" || e.key === " ")
     ) {
       e.preventDefault();
-      openBodyDialog(bodyEl.textContent);
+      openBodyDialog(bodyEl.textContent!);
     }
   });
 
