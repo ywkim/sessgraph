@@ -115,11 +115,13 @@ readonly isToolResultShape: boolean;
 ### 명확한 책임 분리
 
 #### 이 설계(segment-branch-view)의 책임
+
 - isSidechain, isToolResultShape 필드를 사용해 도구 병렬 호출 분기를 식별
 - 분기 시각화에서만 "곁가지 N개" 배지로 표시
 - **노드 렌더링 여부는 결정하지 않는다** — 이것은 별도 설계의 책임
 
 #### serve-command의 책임 (docs/prd/20260902-0420-serve-command.prd.md)
+
 - 실제 DOM 렌더링에서 어떤 노드를 표시할 것인지 결정
 - "콘텐츠 필터링 정책" 섹션에서 정의
 - 도구 호출(`tool_use`, `tool_result`)을 포함할지 제외할지 명시
@@ -136,6 +138,7 @@ segment-branch의 `isSidechain`/`isToolResultShape` 필드는:
 ### 실측 기반 (2026-09-06 기준)
 
 이 설계에서 "노이즈 분기"라 부르는 도구 호출 분기:
+
 - 자식이 둘 이상인 부모 32,935개 중 27,239개(82.7%)
 - 전부 `isSidechain` 또는 `isToolResultShape` 기반
 

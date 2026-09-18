@@ -85,6 +85,7 @@ src/web/app.ts
 노드 표시/숨김 기준은 `docs/prd/20260902-0420-serve-command.prd.md`의 "콘텐츠 필터링 정책" 섹션에서 정의한다.
 
 **현재 정책 (2026-09-18):**
+
 - **표시:** `role: "user" | "assistant" | "claude"` 의 모든 노드
 - **미표시:** 도구 호출 및 결과 (`tool_use`, `tool_result` 등)
 
