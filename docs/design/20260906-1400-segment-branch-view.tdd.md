@@ -108,7 +108,41 @@ readonly isToolResultShape: boolean;
 - `NodeIndex` 필드 추가는 인덱스 하나당 boolean 두 개(≈2바이트) 증가 — 실측 기준선(항목 10,726개)에서 무시할 수 있는 크기다
 - `resolveSegmentBranches`는 조각 하나의 `childrenByParent`만 순회한다 — 세션 전체를 다시 훑지 않는다
 
+## 다른 필터링과의 관계
+
+이 설계의 "분기 시각화 필터링"은 **serve-command의 노드 렌더링 필터링과 다르다.** 두 필터링의 책임을 명확히 한다.
+
+### 명확한 책임 분리
+
+#### 이 설계(segment-branch-view)의 책임
+- isSidechain, isToolResultShape 필드를 사용해 도구 병렬 호출 분기를 식별
+- 분기 시각화에서만 "곁가지 N개" 배지로 표시
+- **노드 렌더링 여부는 결정하지 않는다** — 이것은 별도 설계의 책임
+
+#### serve-command의 책임 (docs/prd/20260902-0420-serve-command.prd.md)
+- 실제 DOM 렌더링에서 어떤 노드를 표시할 것인지 결정
+- "콘텐츠 필터링 정책" 섹션에서 정의
+- 도구 호출(`tool_use`, `tool_result`)을 포함할지 제외할지 명시
+
+### 노드 렌더링에서의 활용
+
+segment-branch의 `isSidechain`/`isToolResultShape` 필드는:
+
+- **✓ 활용 가능:** serve-command의 필터링 판단에 참고될 수 있음 (예: "isSidechain=true인 노드는 기본 미표시")
+- **✗ 하지만:** segment-branch-view 범위 밖의 결정이므로 이 설계에서는 명시하지 않음
+
+**명확한 의도:** segment-branch는 **분기 표시 최적화**이지, **노드 필터링**이 아니다.
+
+### 실측 기반 (2026-09-06 기준)
+
+이 설계에서 "노이즈 분기"라 부르는 도구 호출 분기:
+- 자식이 둘 이상인 부모 32,935개 중 27,239개(82.7%)
+- 전부 `isSidechain` 또는 `isToolResultShape` 기반
+
+이 규모의 노이즈를 노드 렌더링에서도 필터링하는 것이 serve-command PRD의 선택이다 — 결과적으로 serve-command의 필터링과 segment-branch-view의 분기 감지 기준이 일치하지만, **개념적으로는 분리된 결정**이다.
+
 ## 향후 확장 고려사항
 
 - 곁가지를 펼쳐 내용을 보여주는 것 — 이번 설계는 존재/개수만 다루므로, 나중에 추가해도 `BranchPoint`에 `discardedUuids`가 이미 있어 확장 지점을 새로 만들 필요가 없다
 - 도구 병렬 호출 분기를 별도로(예: "도구 N개 동시 호출") 표시하는 것 — 지금은 `isToolResultShape`로 완전히 걸러내지만, 필드 자체는 이미 `NodeIndex`에 있으므로 별도 인덱싱 변경 없이 화면 로직만 추가하면 된다
+- serve-command의 필터링 정책이 바뀐다면, 그 결과가 segment-branch-view의 "곁가지" 정의와 일관되는지 재검토 필수 — 예를 들어 tool_use를 다시 표시하기로 결정했다면 "곁가지"의 배지 텍스트도 바뀌어야 한다
