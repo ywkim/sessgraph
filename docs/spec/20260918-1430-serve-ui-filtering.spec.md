@@ -249,6 +249,95 @@ export type SegmentDetail = {
 - `nodes` 배열이 필터링된 배열인지 확인 필요 (PRD의 포함/제외 기준 적용)
 - 아니면 `renderVirtualList()`에서 `shouldShowNode()`로 필터링
 
+## Interface
+
+### 웹 API 응답 구조
+
+```typescript
+// GET /api/sessions
+SessionSummary[] {
+  id, label, status, failure?, nodeCount?, firstTimestamp?
+}
+
+// GET /api/session/:id/index
+IndexResult {
+  nodes: NodeIndex[] (필터링됨)
+}
+
+// GET /api/session/:id/segment/:rootUuid
+SegmentDetail {
+  nodes: NodeIndex[] (필터링됨),
+  branches: BranchPoint[]
+}
+```
+
+### 클라이언트 함수 시그니처
+
+```typescript
+shouldShowNode(node: NodeIndex): boolean
+renderSessionList(sessions: readonly SessionSummary[]): void
+renderSessionItem(session: SessionSummary): HTMLElement
+filterSessionList(query: string): void
+```
+
+## 데이터 모델
+
+### NodeIndex 필터링 필드
+
+```typescript
+type: "user" | "assistant" | "claude" | "system" | ...
+isSidechain: boolean
+isToolResultShape: boolean
+```
+
+### SessionSummary 정렬 필드
+
+```typescript
+firstTimestamp?: string  // ISO 8601 format
+id: string              // sha256 앞 12자
+```
+
+## 엣지 케이스 & 에러 처리
+
+### 필터링 후 노드가 없는 경우
+- 세그먼트를 펼쳤으나 모든 노드가 tool_use/tool_result인 경우
+- 대응: "표시할 노드가 없습니다" 메시지 표시
+- 예외 발생 없음 (정상 상황)
+
+### 세션 목록에서 firstTimestamp가 없는 경우
+- 레거시 세션 또는 인덱싱 실패 경우
+- 대응: `undefined`로 정렬 (맨 뒤로 배치)
+- 사용자에게 오류로 표시하지 않음
+
+### 검색 쿼리가 특수문자인 경우
+- 검색 문자열에 regex 메타문자 포함
+- 대응: 리터럴 문자열 비교만 사용 (toLowerCase() 포함)
+- 정규식 변환 없음
+
+## 성능 요구사항
+
+### 노드 필터링
+- **목표:** < 1ms for 10,000 노드
+- **방법:** 배열 순회 O(n), 각 노드 type 확인 O(1)
+- **측정:** 실측 기준선 없음 (기존 구현에서 추가 비용 무시할 수 있는 수준)
+
+### 세션 목록 정렬
+- **목표:** 초기 렌더링 < 100ms (1633개 세션 기준)
+- **방법:** Array.sort() O(n log n), 정렬 1회만
+- **캐싱:** 정렬된 목록을 상주시키기 (재정렬 필요 시만 갱신)
+
+### 검색 필터링
+- **목표:** 입력할 때마다 < 50ms (클라이언트 측)
+- **방법:** 현재 화면의 세션들만 순회 (일반적으로 50개 미만)
+
+## Out of Scope
+
+- 세션 목록 초기 로드 시 1633개 전부 인덱싱 (지연 로드 유지)
+- 세션 검색 시 `/api/search` 대신 클라이언트 필터링만 사용
+- 도구 호출 노드의 세부 내용 표시 (그 노드들을 렌더링하지 않음)
+- 필터링 토글 UI (사용자 선택 불가, 정책 고정)
+- 무한 스크롤이나 가상화 개선 (기존 가상 스크롤 유지)
+
 ## 성공 기준
 
 ### 노드 필터링
