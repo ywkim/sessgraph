@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 
 import { buildIndexDetailed } from "./build-index.js";
-import { buildSegmentDetail } from "./serve.js";
+import { buildSegmentDetail, isCollapsedByDefault } from "./serve.js";
 
 const fixturesDir = path.join(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -73,4 +73,19 @@ test("buildSegmentDetail: --reason은 사용자가 채우도록 빈 자리로 �
 test("buildSegmentDetail: 어떤 세그먼트의 root도 아니면 null", () => {
   const { detail } = detailFor("compact-split", U(4));
   assert.equal(detail, null);
+});
+
+test("isCollapsedByDefault: tool_result 모양이거나 sidechain이면 접는다", () => {
+  assert.equal(
+    isCollapsedByDefault({ isToolResultShape: true, isSidechain: false }),
+    true,
+  );
+  assert.equal(
+    isCollapsedByDefault({ isToolResultShape: false, isSidechain: true }),
+    true,
+  );
+  assert.equal(
+    isCollapsedByDefault({ isToolResultShape: false, isSidechain: false }),
+    false,
+  );
 });

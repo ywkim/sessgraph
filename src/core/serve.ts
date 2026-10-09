@@ -8,6 +8,13 @@ import type {
   SuggestedParentSource,
 } from "./types.js";
 
+/** 도구 호출·결과 계열 노드는 기본 접힌 상태로 그린다 (serve-ui-filtering Spec). */
+export function isCollapsedByDefault(
+  node: Pick<NodeIndex, "isToolResultShape" | "isSidechain">,
+): boolean {
+  return node.isToolResultShape || node.isSidechain;
+}
+
 /**
  * 한 세그먼트의 노드 목록과 화면에 표시할 재연결 명령어를 계산한다.
  * 파일을 읽지 않는 순수 함수다 — 본문을 `byteOffset`으로 seek해 읽는 것은

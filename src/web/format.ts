@@ -59,6 +59,25 @@ export function formatTime(timestamp: string | null): string {
   }
 }
 
+/** 최근 세션이 앞. 시각을 모르는 세션(null·해석 불가)은 맨 뒤에 입력 순서대로 둔다. */
+export function sortByRecency<T extends { firstTimestamp: string | null }>(
+  sessions: readonly T[],
+): T[] {
+  const time = (s: T): number => {
+    const t = s.firstTimestamp ? Date.parse(s.firstTimestamp) : NaN;
+    return Number.isNaN(t) ? -Infinity : t;
+  };
+  return sessions
+    .map((s, i) => ({ s, i, t: time(s) }))
+    .sort((a, b) => (a.t === b.t ? a.i - b.i : b.t - a.t))
+    .map(({ s }) => s);
+}
+
+/** 리터럴 부분 문자열 비교(대소문자 무시) — 정규식으로 해석하지 않는다. */
+export function matchesQuery(label: string, query: string): boolean {
+  return label.toLowerCase().includes(query.toLowerCase());
+}
+
 export function escapeHtml(value: unknown): string {
   return String(value).replace(
     /[&<>"']/g,

@@ -20,7 +20,14 @@ import type {
   SessionSummary,
 } from "../core/types.js";
 import { computeBranchLanes } from "../core/segment-branch.js";
-import { summarizeRaw, formatTime, escapeHtml } from "./format.js";
+import { isCollapsedByDefault } from "../core/serve.js";
+import {
+  summarizeRaw,
+  formatTime,
+  escapeHtml,
+  sortByRecency,
+  matchesQuery,
+} from "./format.js";
 
 // 레인 렌더링 개수 상한 — 실측(scripts/measure-branch-structure.mjs)에서
 // laneDepth<=4가 세션의 68%를 덮는다. 그 이상(p90=10, max=41)은 컬럼을
@@ -164,23 +171,58 @@ function renderSessionList(sessions: readonly SessionSummary[]): void {
 
   const list = document.createElement("div");
   list.className = "session-list";
-  for (const session of sessions) {
-    if (session.status === "failed") {
-      const item = document.createElement("div");
-      item.className = "session-item failed";
-      item.innerHTML = `
-        <span class="session-label">${escapeHtml(session.label)}</span>
-        <span class="warning">${escapeHtml(session.failure ?? "읽지 못했습니다")}</span>`;
-      list.append(item);
-      continue;
+
+  const filter = document.createElement("input");
+  filter.type = "search";
+  filter.className = "session-filter";
+  filter.placeholder = "세션 필터 (파일명 또는 경로)";
+  filter.setAttribute("aria-label", "세션 필터");
+  filter.addEventListener("input", () => {
+    for (const item of Array.from(
+      list.querySelectorAll<HTMLElement>(".session-item"),
+    )) {
+      item.hidden = !matchesQuery(item.dataset.label ?? "", filter.value);
     }
-    const item = document.createElement("button");
-    item.type = "button";
-    item.className = "session-item";
-    item.innerHTML = `<span class="session-label">${escapeHtml(session.label)}</span>`;
-    item.addEventListener("click", () => {
-      location.hash = `#session/${encodeURIComponent(session.id)}`;
-    });
+  });
+  timelineEl.append(filter);
+
+  // 실패한 세션도 목록에 남긴다 (ADR-0004). 좁은 화면 처리는 CSS가 맡는다 —
+  // 렌더 시점에 폭을 재지 않으므로 리사이즈에도 안전하다.
+  for (const session of sortByRecency(sessions)) {
+    const failed = session.status === "failed";
+    const item = document.createElement(failed ? "div" : "button");
+    item.className = failed ? "session-item failed" : "session-item";
+    item.dataset.label = session.label;
+    if (item instanceof HTMLButtonElement) item.type = "button";
+
+    const label = document.createElement("span");
+    label.className = "session-label";
+    label.textContent = session.label;
+    label.title = session.label;
+    item.append(label);
+
+    const meta = document.createElement("span");
+    meta.className = "session-meta muted";
+    meta.textContent = [
+      session.firstTimestamp ? formatTime(session.firstTimestamp) : "",
+      session.filteredNodeCount !== null
+        ? `${session.filteredNodeCount}개 노드`
+        : "",
+    ]
+      .filter(Boolean)
+      .join(" · ");
+    item.append(meta);
+
+    if (failed) {
+      const reason = document.createElement("span");
+      reason.className = "warning";
+      reason.textContent = session.failure ?? "읽지 못했습니다";
+      item.append(reason);
+    } else {
+      item.addEventListener("click", () => {
+        location.hash = `#session/${encodeURIComponent(session.id)}`;
+      });
+    }
     list.append(item);
   }
   timelineEl.append(list);
@@ -565,16 +607,33 @@ function renderNode(
   const branchBadge = branch
     ? `<span class="branch muted">곁가지 ${branch.discardedUuids.length}개(재실행/수정)</span>`
     : "";
+  // 접힘은 .node-body만 가린다 — 행 높이는 그대로다(ROW_HEIGHT 불변).
+  // 토글은 가상 스크롤이 행을 다시 만들면 초기 상태로 돌아간다.
+  const collapsible = isCollapsedByDefault(node);
+  if (collapsible) el.classList.add("collapsed");
+  const bodyId = `node-body-${sessionId}-${node.uuid}`;
+  const toggle = collapsible
+    ? `<button type="button" class="node-toggle" aria-expanded="false" aria-controls="${escapeHtml(bodyId)}">펼치기</button>`
+    : "";
   el.innerHTML = `
     ${renderLaneGutter(ownLane, activeLanes)}
     <div class="node-head">
+      ${toggle}
       <span class="node-type">${escapeHtml(node.subtype ?? node.type)}</span>
       <span class="uuid grow">${escapeHtml(node.uuid)}</span>
       ${branchBadge}
       <span class="muted">${formatTime(node.timestamp)}</span>
     </div>
-    <div class="node-body">불러오는 중…</div>`;
+    <div class="node-body" id="${escapeHtml(bodyId)}"${collapsible ? " hidden" : ""}>불러오는 중…</div>`;
   const bodyEl = el.querySelector<HTMLElement>(".node-body")!;
+  const toggleEl = el.querySelector<HTMLButtonElement>(".node-toggle");
+  toggleEl?.addEventListener("click", () => {
+    const collapsed = el.classList.toggle("collapsed");
+    bodyEl.hidden = collapsed;
+    toggleEl.setAttribute("aria-expanded", String(!collapsed));
+    toggleEl.textContent = collapsed ? "펼치기" : "접기";
+    if (!collapsed) markIfTruncated(bodyEl);
+  });
 
   // uuid는 한 세션 안에서만 유일하므로 캐시 키도 세션으로 구분한다 —
   // 서로 다른 세션의 같은 uuid가 조용히 섞이는 것을 막는다
@@ -624,7 +683,8 @@ function renderNode(
  * 프레임에서 판정한다 (docs/design/20260907-1500-node-body-full-text.tdd.md). */
 function markIfTruncated(bodyEl: HTMLElement): void {
   requestAnimationFrame(() => {
-    if (bodyEl.scrollHeight > bodyEl.clientHeight) {
+    const hidden = bodyEl.closest(".node.collapsed") !== null;
+    if (!hidden && bodyEl.scrollHeight > bodyEl.clientHeight) {
       bodyEl.classList.add("truncated");
       bodyEl.setAttribute("role", "button");
       bodyEl.setAttribute("tabindex", "0");

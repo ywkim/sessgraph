@@ -15,8 +15,10 @@ import { fileURLToPath } from "node:url";
 
 import { buildIndexDetailed } from "../core/build-index.js";
 import {
+  FIRST_TIMESTAMP_SCAN_BYTES,
   createRequestHandler,
   isStale,
+  readFirstTimestamp,
   registerSessions,
   runServe,
   sessionIdOf,
@@ -78,6 +80,8 @@ test("serve: /api/sessions는 등록된 세션을 나열한다", async () => {
     assert.equal(sessions[0]!.id, id);
     assert.equal(sessions[0]!.status, "unread");
     assert.equal(sessions[0]!.failure, null);
+    assert.equal(sessions[0]!.filteredNodeCount, null);
+    assert.equal(typeof sessions[0]!.firstTimestamp, "string");
   });
 });
 
@@ -87,6 +91,7 @@ test("serve: 세션을 처음 열면(index 요청) status가 ready로 바뀐다"
     const res = await fetch(`${base}/api/sessions`);
     const sessions = (await res.json()) as SessionSummary[];
     assert.equal(sessions[0]!.status, "ready");
+    assert.equal(typeof sessions[0]!.filteredNodeCount, "number");
   });
 });
 
@@ -378,6 +383,8 @@ test("serve: 세션 인덱싱 실패는 그 세션에만 국한된다", async ()
     const badSummary = sessions.find((s) => s.id === badId);
     assert.equal(badSummary?.status, "failed");
     assert.match(badSummary?.failure ?? "", /parentUuid 필드가 전혀 없습니다/);
+    assert.equal(badSummary?.firstTimestamp, null, "실패 세션은 시각이 null");
+    assert.equal(badSummary?.filteredNodeCount, null);
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }
@@ -523,4 +530,73 @@ test("runServe: 포트가 사용 중이면 다른 포트를 고르지 않고 종
   } finally {
     await new Promise<void>((resolve) => blocker.close(() => resolve()));
   }
+});
+
+function tmpJsonl(content: string): string {
+  const dir = mkdtempSync(path.join(tmpdir(), "sessgraph-first-ts-"));
+  const file = path.join(dir, "session.jsonl");
+  writeFileSync(file, content);
+  return file;
+}
+
+const line = (n: number, timestamp?: string): string =>
+  JSON.stringify({
+    uuid: U(n),
+    parentUuid: null,
+    type: "user",
+    ...(timestamp ? { timestamp } : {}),
+  });
+
+test("readFirstTimestamp: 첫 timestamp 문자열을 돌려준다", () => {
+  const file = tmpJsonl(`${line(1, "2026-01-01T00:00:01.000Z")}\n${line(2)}\n`);
+  assert.equal(readFirstTimestamp(file), "2026-01-01T00:00:01.000Z");
+});
+
+test("readFirstTimestamp: timestamp 없는 줄은 건너뛰고 다음 줄 값을 찾는다", () => {
+  const file = tmpJsonl(`${line(1)}\n${line(2, "2026-01-02T00:00:00.000Z")}\n`);
+  assert.equal(readFirstTimestamp(file), "2026-01-02T00:00:00.000Z");
+});
+
+test("readFirstTimestamp: 깨진 JSON 줄은 건너뛰고 다음 줄 값을 찾는다", () => {
+  const file = tmpJsonl(`{not json\n${line(2, "2026-01-03T00:00:00.000Z")}\n`);
+  assert.equal(readFirstTimestamp(file), "2026-01-03T00:00:00.000Z");
+});
+
+test("readFirstTimestamp: timestamp가 문자열이 아니면 건너뛴다", () => {
+  const bad = JSON.stringify({ uuid: U(1), timestamp: 12345 });
+  const file = tmpJsonl(`${bad}\n${line(2, "2026-01-04T00:00:00.000Z")}\n`);
+  assert.equal(readFirstTimestamp(file), "2026-01-04T00:00:00.000Z");
+});
+
+test("readFirstTimestamp: 빈 파일이거나 timestamp가 전혀 없으면 null", () => {
+  assert.equal(readFirstTimestamp(tmpJsonl("")), null);
+  assert.equal(readFirstTimestamp(tmpJsonl(`${line(1)}\n${line(2)}\n`)), null);
+});
+
+test("readFirstTimestamp: 존재하지 않는 파일은 null", () => {
+  const file = tmpJsonl("");
+  assert.equal(readFirstTimestamp(`${file}.missing`), null);
+});
+
+test("readFirstTimestamp: 창 경계에서 잘린 마지막 줄은 버리고 앞 줄 값을 쓴다", () => {
+  const first = line(1, "2026-01-05T00:00:00.000Z");
+  const pad = "x".repeat(FIRST_TIMESTAMP_SCAN_BYTES - first.length - 1);
+  // 창 끝에 걸친 두 번째 줄은 잘려 깨진 JSON이 된다 — 완결된 첫 줄만 쓴다
+  const cut = JSON.stringify({
+    uuid: U(2),
+    pad,
+    timestamp: "2099-01-01T00:00:00.000Z",
+  });
+  const file = tmpJsonl(`${first}\n${cut}\n`);
+  assert.equal(readFirstTimestamp(file), "2026-01-05T00:00:00.000Z");
+});
+
+test("readFirstTimestamp: 창 안에서 끝나지 않는 첫 줄은 null", () => {
+  const huge = JSON.stringify({
+    uuid: U(1),
+    pad: "x".repeat(FIRST_TIMESTAMP_SCAN_BYTES),
+    timestamp: "2026-01-06T00:00:00.000Z",
+  });
+  const file = tmpJsonl(`${huge}\n${line(2, "2026-01-07T00:00:00.000Z")}\n`);
+  assert.equal(readFirstTimestamp(file), null);
 });
