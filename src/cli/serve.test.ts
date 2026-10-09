@@ -574,7 +574,11 @@ test("readFirstTimestamp: 메시지가 없으면 snapshot.timestamp를 쓴다", 
     messageId: U(1),
     snapshot: { messageId: U(1), timestamp: "2026-01-08T00:00:00.000Z" },
   });
-  const summary = JSON.stringify({ type: "summary", summary: "x", leafUuid: U(9) });
+  const summary = JSON.stringify({
+    type: "summary",
+    summary: "x",
+    leafUuid: U(9),
+  });
   const file = tmpJsonl(`${summary}\n${snap}\n`);
   assert.equal(readFirstTimestamp(file), "2026-01-08T00:00:00.000Z");
 });
