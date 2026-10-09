@@ -379,6 +379,27 @@ button.copy {
   overflow: hidden;
 }
 
+/* 기본 접힘: 본문만 가린다. 행 높이(--row-height)는 그대로다. */
+.node.collapsed .node-body {
+  max-height: 0;
+  margin-top: 0;
+}
+
+.node.collapsed .node-head {
+  opacity: 0.6;
+}
+
+.node-toggle {
+  flex: none;
+  padding: 0 var(--space-2);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--panel);
+  font: inherit;
+  font-size: var(--font-meta);
+  cursor: pointer;
+}
+
 .node-body.truncated {
   cursor: pointer;
   /* 잘렸음을 시각적으로 드러낸다 — 마지막 줄 아래를 배경색으로 흐리게
@@ -432,6 +453,31 @@ button.copy {
   font: inherit;
   text-align: left;
   cursor: pointer;
+}
+
+.session-filter {
+  width: 100%;
+  margin: 0 0 var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  font: inherit;
+}
+
+.session-item[hidden] {
+  display: none;
+}
+
+.session-label {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* 좁은 화면: 메타는 줄이고 경로는 줄바꿈으로 전부 보인다 */
+@media (max-width: 480px) {
+  .session-meta {
+    display: none;
+  }
 }
 
 .session-item:hover {

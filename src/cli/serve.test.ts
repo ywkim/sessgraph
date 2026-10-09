@@ -78,6 +78,8 @@ test("serve: /api/sessions는 등록된 세션을 나열한다", async () => {
     assert.equal(sessions[0]!.id, id);
     assert.equal(sessions[0]!.status, "unread");
     assert.equal(sessions[0]!.failure, null);
+    assert.equal(sessions[0]!.filteredNodeCount, null);
+    assert.equal(typeof sessions[0]!.firstTimestamp, "string");
   });
 });
 
@@ -87,6 +89,7 @@ test("serve: 세션을 처음 열면(index 요청) status가 ready로 바뀐다"
     const res = await fetch(`${base}/api/sessions`);
     const sessions = (await res.json()) as SessionSummary[];
     assert.equal(sessions[0]!.status, "ready");
+    assert.equal(typeof sessions[0]!.filteredNodeCount, "number");
   });
 });
 

@@ -1,7 +1,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { summarizeRaw, formatTime, escapeHtml } from "./format.js";
+import {
+  summarizeRaw,
+  formatTime,
+  escapeHtml,
+  sortByRecency,
+  matchesQuery,
+} from "./format.js";
 
 test("summarizeRaw: message.content가 문자열이면 그대로 반환한다", () => {
   const raw = JSON.stringify({ message: { content: "hello" } });
@@ -83,4 +89,24 @@ test("escapeHtml: HTML 특수문자를 이스케이프한다", () => {
 
 test("escapeHtml: 문자열이 아닌 값도 String()으로 변환한다", () => {
   assert.equal(escapeHtml(42), "42");
+});
+
+test("sortByRecency: 최근 순, 시각을 모르는 세션은 맨 뒤에 입력 순서로", () => {
+  const out = sortByRecency([
+    { id: "a", firstTimestamp: null },
+    { id: "b", firstTimestamp: "2026-01-01T00:00:00Z" },
+    { id: "c", firstTimestamp: "not-a-date" },
+    { id: "d", firstTimestamp: "2026-02-01T00:00:00Z" },
+  ]);
+  assert.deepEqual(
+    out.map((s) => s.id),
+    ["d", "b", "a", "c"],
+  );
+});
+
+test("matchesQuery: 대소문자 무시 리터럴 비교, 정규식 문자는 그대로 취급", () => {
+  assert.equal(matchesQuery("Proj/ABC.jsonl", "abc"), true);
+  assert.equal(matchesQuery("proj/a.b.jsonl", "a.b"), true);
+  assert.equal(matchesQuery("proj/axb.jsonl", "a.b"), false);
+  assert.equal(matchesQuery("anything", ""), true);
 });

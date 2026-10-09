@@ -9,7 +9,7 @@ import { parseArgs } from "node:util";
 
 import { buildIndexDetailed } from "../core/build-index.js";
 import { attributeMatches, scanFile } from "../core/search.js";
-import { buildSegmentDetail } from "../core/serve.js";
+import { buildSegmentDetail, isCollapsedByDefault } from "../core/serve.js";
 import type {
   IndexResult,
   NodeIndex,
@@ -185,7 +185,45 @@ type SessionEntry = {
   readonly filePath: string;
   state: IndexState | null;
   failure: string | null;
+  /** 앞부분 스캔 결과 캐시. undefined = 아직 안 읽음, null = 찾지 못함 */
+  firstTimestamp?: string | null;
 };
+
+const FIRST_TIMESTAMP_SCAN_BYTES = 64 * 1024;
+
+/**
+ * 파일 앞 64KB의 완결된 줄에서 첫 timestamp를 찾는다. 전체 인덱싱 없이
+ * 세션 목록을 정렬하기 위한 값이다. 못 찾거나 읽지 못하면 null.
+ */
+export function readFirstTimestamp(filePath: string): string | null {
+  let fd: number;
+  try {
+    fd = openSync(filePath, "r");
+  } catch {
+    return null;
+  }
+  try {
+    const buf = Buffer.alloc(FIRST_TIMESTAMP_SCAN_BYTES);
+    const read = readSync(fd, buf, 0, buf.length, 0);
+    const lines = buf.subarray(0, read).toString("utf8").split("\n");
+    // 마지막 조각은 잘렸을 수 있다. 파일이 창보다 짧으면 완결된 줄이다.
+    if (read === buf.length) lines.pop();
+    for (const line of lines) {
+      if (!line) continue;
+      try {
+        const ts = (JSON.parse(line) as { timestamp?: unknown }).timestamp;
+        if (typeof ts === "string") return ts;
+      } catch {
+        // 깨진 줄은 건너뛴다 — 목록 정렬용 값일 뿐 판정에 쓰지 않는다
+      }
+    }
+    return null;
+  } catch {
+    return null;
+  } finally {
+    closeSync(fd);
+  }
+}
 
 /** 존재하는 경로만 등록한다. 등록 시점에 존재 여부를 확정하고, 내용은 읽지 않는다. */
 export function registerSessions(
@@ -208,12 +246,24 @@ export function registerSessions(
 }
 
 function summaryOf(entry: SessionEntry): SessionSummary {
+  const failed = entry.failure !== null;
+  if (!failed && entry.firstTimestamp === undefined) {
+    entry.firstTimestamp = readFirstTimestamp(entry.filePath);
+  }
+  let filteredNodeCount: number | null = null;
+  if (!failed && entry.state) {
+    filteredNodeCount = 0;
+    for (const node of entry.state.nodes.values()) {
+      if (!isCollapsedByDefault(node)) filteredNodeCount++;
+    }
+  }
   return {
     id: entry.id,
     label: entry.label,
-    status:
-      entry.failure !== null ? "failed" : entry.state ? "ready" : "unread",
+    status: failed ? "failed" : entry.state ? "ready" : "unread",
     failure: entry.failure,
+    firstTimestamp: failed ? null : (entry.firstTimestamp ?? null),
+    filteredNodeCount,
   };
 }
 

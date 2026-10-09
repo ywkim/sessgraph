@@ -373,6 +373,10 @@ export interface SessionSummary {
   readonly status: "unread" | "ready" | "failed";
   /** status가 "failed"일 때만 값을 가진다 */
   readonly failure: string | null;
+  /** 파일 앞부분에서 찾은 첫 timestamp. 못 찾았거나 읽지 못한 세션은 null (정렬 시 맨 뒤) */
+  readonly firstTimestamp: string | null;
+  /** 기본 접힘이 아닌 노드 수. 아직 인덱싱 전이거나 실패한 세션은 null — 목록을 위해 전부 인덱싱하지 않는다 */
+  readonly filteredNodeCount: number | null;
 }
 
 /* ── search (docs/spec/20260906-0900-body-search.spec.md) ─────────────────── */
