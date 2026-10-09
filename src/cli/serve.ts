@@ -189,7 +189,7 @@ type SessionEntry = {
   firstTimestamp?: string | null;
 };
 
-const FIRST_TIMESTAMP_SCAN_BYTES = 64 * 1024;
+export const FIRST_TIMESTAMP_SCAN_BYTES = 64 * 1024;
 
 /**
  * 파일 앞 64KB의 완결된 줄에서 첫 timestamp를 찾는다. 전체 인덱싱 없이

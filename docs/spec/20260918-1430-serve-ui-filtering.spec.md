@@ -68,6 +68,15 @@ export interface SessionSummary {
 
 JS에서 화면 폭을 재지 않는다. 좁은 화면 대응은 CSS 미디어 쿼리만 쓴다 (`@media (max-width: 480px)`에서 `.session-meta` 숨김). 렌더 시점에 폭을 읽지 않으므로 창 크기를 바꿔도 다시 그릴 필요가 없다.
 
+**기존 Spec 기준(768px, basename + 상태 아이콘)에서 바꾼 이유:**
+
+- **768px → 480px:** 노드 목록의 컨테이너 쿼리가 이미 `max-width: 480px`을 좁은 화면 기준으로 쓴다 (`src/web/app.css`, responsive-layout 설계). 세션 목록만 768px을 쓰면 같은 앱 안에 좁은 화면 기준이 두 개가 된다.
+- **컨테이너 쿼리 대신 `@media`:** 세션 목록 화면에는 `container-name: node-list`인 `.viewport`가 없다 (`#timeline` 안에 목록만 있다). 반응할 컨테이너가 없어 뷰포트 폭으로 대신한다. 이 화면이 별도 패널 안에 놓이게 되면 컨테이너 쿼리로 옮겨야 한다.
+- **basename 제거:** 라벨을 줄바꿈해 전체 경로를 그대로 보이고 `title`로도 남긴다. basename만 보이면 같은 파일명이 다른 디렉터리에 있을 때 구분할 수 없다.
+- **상태 아이콘 제거:** 목록은 상태 글자를 따로 그리지 않는다. 실패한 세션만 `.failed` 스타일과 사유(`.warning`)로 구분하고, `ready`/`unread` 차이는 표시하지 않는다. 이 판단은 설계 논의 없이 구현 중에 내렸다.
+
+**검증 범위:** 375px 폭에서 메타가 숨겨지고 가로 스크롤이 없음을 확인했다. 480px 경계 자체와 그 위 폭(481~767px)은 실측하지 않았다.
+
 ## 노드 표시 로직
 
 ### 기본 접기 판정 함수
@@ -94,13 +103,12 @@ export function isCollapsedByDefault(
 **행 높이 불변성 (responsive-layout 제약):**
 
 - 가상 스크롤은 모든 행이 정확히 52px 높이를 가정한다
-- `.collapsed` 클래스는 내용을 시각적으로 숨기기만 하고, 행 높이를 변경하지 않는다
+- 접힌 노드의 본문(`.node-body`)에는 `hidden` 속성을 걸어 접근성 트리와 포커스에서도 뺀다. 행 높이는 바꾸지 않는다
+- 토글 버튼은 `aria-expanded`로 상태를, `aria-controls`로 본문 id(`node-body-{sessionId}-{uuid}`)를 가리킨다
 - CSS 구현:
   ```css
-  .node.collapsed .node-body {
-    max-height: 0;
-    overflow: hidden;
-    /* 행 자체는 여전히 52px */
+  .node-body[hidden] {
+    display: none; /* 행 자체는 여전히 52px */
   }
   ```
 
@@ -109,8 +117,8 @@ export function isCollapsedByDefault(
 - `renderVirtualList()`에서 노드를 렌더링할 때:
   1. 모든 노드를 DOM에 추가 (숨기지 않음)
   2. 기본 접기 노드에 `.collapsed` 클래스 적용
-  3. 펼치기 버튼으로 클래스 토글 가능
-  4. 토글 시 `.collapsed` 클래스만 변경, 행 높이는 불변
+  3. 펼치기 버튼으로 `.collapsed` 클래스와 본문 `hidden`을 함께 토글
+  4. 토글해도 행 높이는 불변
 
 ### 콘텐츠 축약 (기존 정책 유지)
 
@@ -160,13 +168,13 @@ if (screenWidth < NARROW_THRESHOLD) {
 
 **해결:**
 
-- `.collapsed` 클래스는 내용을 **CSS로 숨기기만** 함 (max-height: 0, overflow: hidden)
+- 접힌 노드는 본문에 `hidden`을 걸어 숨기기만 함 (행 높이 규칙은 건드리지 않음)
 - 행 자체는 항상 52px 높이를 유지
 - 결과: 가상 스크롤 상태가 변경되지 않고, 창 크기 변경 시에도 재계산 불필요
 
 **구현 제약:** 행 높이 동적 조정 없이, 도구 노드를 "접힌 상태"로 표시. 사용자는 펼치기 버튼으로 내용을 확인 가능.
 
-**알려진 한계:** 접어도 행 높이는 52px 그대로라 세로 공간이 줄지 않는다. 접힘의 효과는 본문(`.node-body`)을 가리고 헤드를 흐리게(`opacity`) 보이는 시각 구분에 한정된다.
+**알려진 한계:** 접어도 행 높이는 52px 그대로라 세로 공간이 줄지 않는다. 접힘의 효과는 본문(`.node-body`)을 숨기고 헤드를 흐리게(`opacity`) 보이는 구분에 한정된다.
 
 ### 2. 도구 호출 분기 감지 (feature completeness)
 

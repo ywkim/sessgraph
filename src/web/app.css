@@ -379,10 +379,10 @@ button.copy {
   overflow: hidden;
 }
 
-/* 기본 접힘: 본문만 가린다. 행 높이(--row-height)는 그대로다. */
-.node.collapsed .node-body {
-  max-height: 0;
-  margin-top: 0;
+/* 기본 접힘: 본문은 hidden 속성으로 숨겨 접근성 트리·포커스에서도 빠진다.
+   행 높이(--row-height)는 그대로다. */
+.node-body[hidden] {
+  display: none;
 }
 
 .node.collapsed .node-head {

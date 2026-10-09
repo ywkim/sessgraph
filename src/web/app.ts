@@ -611,8 +611,9 @@ function renderNode(
   // 토글은 가상 스크롤이 행을 다시 만들면 초기 상태로 돌아간다.
   const collapsible = isCollapsedByDefault(node);
   if (collapsible) el.classList.add("collapsed");
+  const bodyId = `node-body-${sessionId}-${node.uuid}`;
   const toggle = collapsible
-    ? `<button type="button" class="node-toggle" aria-expanded="false">펼치기</button>`
+    ? `<button type="button" class="node-toggle" aria-expanded="false" aria-controls="${escapeHtml(bodyId)}">펼치기</button>`
     : "";
   el.innerHTML = `
     ${renderLaneGutter(ownLane, activeLanes)}
@@ -623,11 +624,12 @@ function renderNode(
       ${branchBadge}
       <span class="muted">${formatTime(node.timestamp)}</span>
     </div>
-    <div class="node-body">불러오는 중…</div>`;
+    <div class="node-body" id="${escapeHtml(bodyId)}"${collapsible ? " hidden" : ""}>불러오는 중…</div>`;
   const bodyEl = el.querySelector<HTMLElement>(".node-body")!;
   const toggleEl = el.querySelector<HTMLButtonElement>(".node-toggle");
   toggleEl?.addEventListener("click", () => {
     const collapsed = el.classList.toggle("collapsed");
+    bodyEl.hidden = collapsed;
     toggleEl.setAttribute("aria-expanded", String(!collapsed));
     toggleEl.textContent = collapsed ? "펼치기" : "접기";
     if (!collapsed) markIfTruncated(bodyEl);
