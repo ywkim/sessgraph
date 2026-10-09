@@ -176,9 +176,13 @@ function renderSessionItem(session: SessionSummary): HTMLElement {
 
   // 상태 아이콘
   const statusIcon =
-    session.status === "unread" ? "⏳" :
-    session.status === "ready" ? "✓" :
-    session.status === "failed" ? "✗" : "•";
+    session.status === "unread"
+      ? "⏳"
+      : session.status === "ready"
+        ? "✓"
+        : session.status === "failed"
+          ? "✗"
+          : "•";
 
   // 경로 표시
   const displayPath = isNarrow
@@ -268,6 +272,7 @@ function filterSessionList(query: string): void {
 **충돌:** 가상 스크롤은 `ROW_HEIGHT = 52`를 고정값으로 가정하는데, 기본 접기 상태가 행 높이를 변경하면 가상 스크롤 계산이 깨진다.
 
 **해결:**
+
 - `.collapsed` 클래스는 내용을 **CSS로 숨기기만** 함 (max-height: 0, overflow: hidden)
 - 행 자체는 항상 52px 높이를 유지
 - 결과: 가상 스크롤 상태가 변경되지 않고, 창 크기 변경 시에도 재계산 불필요
@@ -279,11 +284,13 @@ function filterSessionList(query: string): void {
 **충돌:** `isToolResultShape`는 tool_result 노드만 감지하고, tool_use 노드는 감지하지 못함.
 
 **해결:**
+
 ```typescript
 function isCollapsedByDefault(node: NodeIndex): boolean {
   return node.isToolResultShape === true || node.isSidechain === true;
 }
 ```
+
 - `isToolResultShape: true` → tool_result 노드
 - `isSidechain: true` → 도구 호출 분기 노드 (대부분이 tool_use 분기)
 - 둘 중 하나라도 true면 기본 접힌 상태
@@ -295,11 +302,13 @@ function isCollapsedByDefault(node: NodeIndex): boolean {
 **충돌:** SessionSummary는 `firstTimestamp`, `filteredNodeCount`를 필수 필드로 요구하는데, 이는 모든 세션을 읽어야 계산됨. 지연 인덱싱과 충돌.
 
 **해결:**
+
 - `/api/sessions` 호출 시 **메타데이터만 계산**하여 응답
 - 메타데이터 계산은 가볍고 빠름 (파일 헤더 스캔, 노드 카운팅)
 - 전체 세션 콘텐츠는 사용자가 세션을 클릭했을 때 `/api/session/:id/segment/:rootUuid`에서 로드 (지연)
 
 **구현 전략:**
+
 1. 서버: 모든 세션에 대해 메타데이터만 전달
 2. 클라이언트: 목록 표시, 정렬, 검색 수행
 3. 서버: 클릭 시 해당 세션의 전체 노드 로드 (on-demand)
