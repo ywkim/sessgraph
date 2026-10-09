@@ -76,40 +76,42 @@ src/web/app.ts
 
 - 기각 이유: 같은 기록에 대해 두 벌의 표시 로직이 생긴다. 두 화면이 다른 답을 내는 실패 모드는 [ADR-0001](../adr/ADR-0001-typescript-single-language.md)이 언어 선택에서 이미 다룬 것과 같은 종류이며, 표시 계층에서 반복할 이유가 없다
 
-## 노드 필터링과의 관계
+## 노드 표시 정책과의 관계
 
-이 설계의 핵심은 **행 높이 고정** 및 **콘텐츠 축약**이다. 노드 타입별로 어떤 노드를 표시할지 결정하는 필터링 정책은 별개 설계 영역이다.
+이 설계의 핵심은 **행 높이 고정** 및 **콘텐츠 축약**이다. 모든 노드를 표시하되, 도구 호출·결과 노드의 표시 방식은 별개 설계 영역이다.
 
-### 필터링 정책의 출처
+### 노드 표시 정책의 출처
 
-노드 표시/숨김 기준은 `docs/prd/20260902-0420-serve-command.prd.md`의 "콘텐츠 필터링 정책" 섹션에서 정의한다.
+노드 표시 방식(기본 접힘 등)은 `docs/prd/20260902-0420-serve-command.prd.md`의 "노드 표시 및 필터링 정책" 섹션에서 정의한다.
 
-**현재 정책 (2026-09-18):**
+**현재 정책:**
 
-- **표시:** `role: "user" | "assistant" | "claude"` 의 모든 노드
-- **미표시:** 도구 호출 및 결과 (`tool_use`, `tool_result` 등)
+- **표시:** 모든 노드를 타임라인에 표시
+- **도구 호출·결과 노드:** 기본 접힌 상태로 렌더링 (펼치기 수단 제공)
 
 ### 구현 시 주의사항
 
-1. **segment-branch-view 필터링과 혼동 금지:**
+1. **segment-branch-view와의 관계:**
    - **segment-branch-view:** 분기 시각화에서 도구 호출 분기를 "곁가지" 범주로 표시 (isSidechain 기반)
-   - **serve-command:** 노드 렌더링에서 어떤 타입의 노드를 DOM에 그릴 것인지 결정
-   - 두 필터링은 **독립적인 책임**이다. segment-branch가 분기를 감지하더라도, 그 분기의 노드 하나하나를 렌더링할지는 serve-command 필터링이 결정한다
+   - **serve-command:** 노드 렌더링에서 도구 호출·결과 노드를 기본 접힌 상태로 표시
+   - 두 책임은 보완적이다. segment-branch가 분기를 시각화하고, serve-command가 도구 노드를 기본 접침으로써 사용자 대화 흐름이 명확해진다
 
-2. **narrow 화면에서의 일관성:**
-   - narrow에서 특정 노드 타입을 완전히 숨기면 (예: tool_use), 사용자는 그 노드들의 "전체 보기" 수단을 얻을 수 없다
-   - 현재 정책은 wide/narrow 동일한 노드를 표시하고, **콘텐츠만 축약**한다 (uuid truncate, body line limit)
+2. **wide/narrow 화면 일관성:**
+   - 모든 노드를 표시하므로 wide/narrow 차이가 없다
+   - 축약되는 것은 **콘텐츠**이지 노드 자체가 아니다 (uuid truncate, body line limit)
+   - 축약된 콘텐츠마다 항상 "전체 보기" 수단이 있다
 
 3. **구현 위치:**
-   - 필터링 로직은 `src/web/app.ts`의 노드 렌더링 함수에서 적용
-   - 화면 너비 감지 후 `shouldShowNode(node, screenWidth)` 같은 함수로 필터링 실행
-   - 필터링 기준은 NodeIndex의 `type`, `subtype` 필드 또는 별도 helper 함수 사용
+   - 도구 노드 감지: NodeIndex의 `isToolResultShape` 필드 (tool_result 감지)
+   - 렌더링: `src/web/app.ts`에서 도구 노드에 "기본 접힘" 클래스 적용
+   - 펼치기 수단: UI 토글 버튼 또는 클릭
 
 ### 성공 기준
 
-- [ ] wide/narrow 모두에서 노드가 일관되게 필터링됨
+- [ ] wide/narrow 모두에서 모든 노드가 타임라인에 표시됨
+- [ ] 도구 호출·결과 노드가 기본 접힌 상태로 렌더링됨
 - [ ] 축약된 콘텐츠(uuid, body 등)마다 전체 보기 수단이 있음
-- [ ] segment-branch-view의 "곁가지" 배지와 serve-command의 필터링이 서로 모순하지 않음
+- [ ] segment-branch-view의 "곁가지" 배지와 serve-command의 기본 접힘이 일관됨
 
 ## 향후 확장 고려사항
 

@@ -108,32 +108,32 @@ readonly isToolResultShape: boolean;
 - `NodeIndex` 필드 추가는 인덱스 하나당 boolean 두 개(≈2바이트) 증가 — 실측 기준선(항목 10,726개)에서 무시할 수 있는 크기다
 - `resolveSegmentBranches`는 조각 하나의 `childrenByParent`만 순회한다 — 세션 전체를 다시 훑지 않는다
 
-## 다른 필터링과의 관계
+## serve-command와의 관계
 
-이 설계의 "분기 시각화 필터링"은 **serve-command의 노드 렌더링 필터링과 다르다.** 두 필터링의 책임을 명확히 한다.
+이 설계의 "분기 시각화"는 **serve-command의 노드 표시 방식과 보완적이다.** 두 설계의 책임을 명확히 한다.
 
 ### 명확한 책임 분리
 
 #### 이 설계(segment-branch-view)의 책임
 
 - isSidechain, isToolResultShape 필드를 사용해 도구 병렬 호출 분기를 식별
-- 분기 시각화에서만 "곁가지 N개" 배지로 표시
-- **노드 렌더링 여부는 결정하지 않는다** — 이것은 별도 설계의 책임
+- 분기 시각화에서 "곁가지 N개" 배지로 표시
+- 분기의 **시각적 구조** (레인, 깊이, 중첩)를 렌더링
 
 #### serve-command의 책임 (docs/prd/20260902-0420-serve-command.prd.md)
 
-- 실제 DOM 렌더링에서 어떤 노드를 표시할 것인지 결정
-- "콘텐츠 필터링 정책" 섹션에서 정의
-- 도구 호출(`tool_use`, `tool_result`)을 포함할지 제외할지 명시
+- 모든 노드를 타임라인에 표시
+- 도구 호출·결과 노드를 **기본 접힌 상태**로 렌더링
+- "노드 표시 및 필터링 정책" 섹션에서 정의
 
-### 노드 렌더링에서의 활용
+### isToolResultShape 필드의 활용
 
-segment-branch의 `isSidechain`/`isToolResultShape` 필드는:
+segment-branch가 식별한 `isToolResultShape` 필드는:
 
-- **✓ 활용 가능:** serve-command의 필터링 판단에 참고될 수 있음 (예: "isSidechain=true인 노드는 기본 미표시")
-- **✗ 하지만:** segment-branch-view 범위 밖의 결정이므로 이 설계에서는 명시하지 않음
+- **serve-command에서 활용:** tool_result 노드를 식별해 기본 접힘 표시 적용
+- **두 설계의 관계:** segment-branch가 분기를 시각화하고, serve-command가 도구 노드를 기본 접침으로써 사용자 대화 흐름이 명확해짐
 
-**명확한 의도:** segment-branch는 **분기 표시 최적화**이지, **노드 필터링**이 아니다.
+**명확한 의도:** segment-branch는 **분기 시각화**이고, serve-command는 **노드 표시 방식**이다. 둘 다 동일한 필드를 참고하지만 책임은 다르다.
 
 ### 실측 기반 (2026-09-06 기준)
 
