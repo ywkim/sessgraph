@@ -192,8 +192,10 @@ type SessionEntry = {
 export const FIRST_TIMESTAMP_SCAN_BYTES = 64 * 1024;
 
 /**
- * 파일 앞 64KB의 완결된 줄에서 첫 timestamp를 찾는다. 전체 인덱싱 없이
- * 세션 목록을 정렬하기 위한 값이다. 못 찾거나 읽지 못하면 null.
+ * 파일 앞 64KB의 완결된 줄에서 가장 앞선 timestamp를 찾는다. 전체 인덱싱 없이
+ * 세션 목록을 정렬하기 위한 값이다. 메시지 줄의 최상위 `timestamp`를 쓰고,
+ * 메시지가 없는 파일(`file-history-snapshot`만 있는 세션)은 그 줄의
+ * `snapshot.timestamp`를 쓴다. 못 찾거나 읽지 못하면 null.
  */
 export function readFirstTimestamp(filePath: string): string | null {
   let fd: number;
@@ -211,7 +213,11 @@ export function readFirstTimestamp(filePath: string): string | null {
     for (const line of lines) {
       if (!line) continue;
       try {
-        const ts = (JSON.parse(line) as { timestamp?: unknown }).timestamp;
+        const parsed = JSON.parse(line) as {
+          timestamp?: unknown;
+          snapshot?: { timestamp?: unknown } | null;
+        } | null;
+        const ts = parsed?.timestamp ?? parsed?.snapshot?.timestamp;
         if (typeof ts === "string") return ts;
       } catch {
         // 깨진 줄은 건너뛴다 — 목록 정렬용 값일 뿐 판정에 쓰지 않는다
