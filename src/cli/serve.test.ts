@@ -568,6 +568,37 @@ test("readFirstTimestamp: timestamp가 문자열이 아니면 건너뛴다", () 
   assert.equal(readFirstTimestamp(file), "2026-01-04T00:00:00.000Z");
 });
 
+test("readFirstTimestamp: 메시지가 없으면 snapshot.timestamp를 쓴다", () => {
+  const snap = JSON.stringify({
+    type: "file-history-snapshot",
+    messageId: U(1),
+    snapshot: { messageId: U(1), timestamp: "2026-01-08T00:00:00.000Z" },
+  });
+  const summary = JSON.stringify({
+    type: "summary",
+    summary: "x",
+    leafUuid: U(9),
+  });
+  const file = tmpJsonl(`${summary}\n${snap}\n`);
+  assert.equal(readFirstTimestamp(file), "2026-01-08T00:00:00.000Z");
+});
+
+test("readFirstTimestamp: 최상위 timestamp와 snapshot.timestamp 중 먼저 나온 줄을 쓴다", () => {
+  const snap = JSON.stringify({
+    type: "file-history-snapshot",
+    snapshot: { timestamp: "2026-01-09T00:00:00.000Z" },
+  });
+  const file = tmpJsonl(`${snap}\n${line(1, "2026-01-09T00:00:05.000Z")}\n`);
+  assert.equal(readFirstTimestamp(file), "2026-01-09T00:00:00.000Z");
+});
+
+test("readFirstTimestamp: snapshot이 null이거나 timestamp가 문자열이 아니면 건너뛴다", () => {
+  const a = JSON.stringify({ type: "file-history-snapshot", snapshot: null });
+  const b = JSON.stringify({ snapshot: { timestamp: 1 } });
+  const file = tmpJsonl(`${a}\n${b}\n${line(1, "2026-01-10T00:00:00.000Z")}\n`);
+  assert.equal(readFirstTimestamp(file), "2026-01-10T00:00:00.000Z");
+});
+
 test("readFirstTimestamp: 빈 파일이거나 timestamp가 전혀 없으면 null", () => {
   assert.equal(readFirstTimestamp(tmpJsonl("")), null);
   assert.equal(readFirstTimestamp(tmpJsonl(`${line(1)}\n${line(2)}\n`)), null);

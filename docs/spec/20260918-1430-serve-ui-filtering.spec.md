@@ -59,7 +59,7 @@ export interface SessionSummary {
 **메타데이터 계산 (지연 인덱싱과의 조화):**
 
 - 전체 세션을 인덱싱하지 않는다. 그래서 두 필드는 null을 허용한다.
-  - `firstTimestamp`: 파일 앞 64KB만 읽어 첫 번째 `timestamp`를 찾는다. 결과는 세션별로 캐시한다. 찾지 못하거나 읽기에 실패하면 null이다.
+  - `firstTimestamp`: 파일 앞 64KB만 읽어 가장 앞선 `timestamp`를 찾는다. 메시지 줄의 최상위 `timestamp`를 쓰되, 메시지가 없는 파일은 `file-history-snapshot` 줄의 `snapshot.timestamp`를 쓴다. 결과는 세션별로 캐시한다. 찾지 못하거나 읽기에 실패하면 null이다.
   - `filteredNodeCount`: 이미 인덱싱된 세션만 `!isCollapsedByDefault(node)` 노드를 센다. 인덱싱 전이거나 실패한 세션은 null이다.
   - `status`: 기존 로직 그대로.
 - 전체 노드 콘텐츠는 사용자가 세션을 클릭했을 때 `/api/session/:id/segment/:rootUuid`에서 로드 (지연)
@@ -258,7 +258,8 @@ filteredNodeCount: number | null; // 기본 접힘이 아닌 노드 수. 인덱�
 ### firstTimestamp가 null인 경우
 
 - 오류가 아니다. 목록에서 시각 표시를 생략하고 정렬은 맨 뒤에 둔다 (입력 순서 유지).
-- 파일이 비었거나 앞 64KB 안에 timestamp가 없거나 읽기에 실패한 경우다.
+- 파일이 비었거나, 앞 64KB 안에 두 종류의 timestamp(메시지 줄의 `timestamp`, 스냅샷 줄의 `snapshot.timestamp`)가 모두 없거나, 읽기에 실패한 경우다.
+- 상시 인스턴스 실측(2026-10-09, 1633개 중 759개): 743개는 파일 전체에 최상위 `timestamp`가 없었다 (`summary`·`file-history-snapshot` 줄뿐인 파일). `snapshot.timestamp`로 647개가 채워지고, `summary`만 있는 112개는 시각이 없어 null로 남는다.
 
 ### filteredNodeCount가 null인 경우
 
