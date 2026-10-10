@@ -26,6 +26,7 @@ import {
   formatTime,
   escapeHtml,
   sortByRecency,
+  sessionSubline,
   matchesQuery,
 } from "./format.js";
 
@@ -175,13 +176,13 @@ function renderSessionList(sessions: readonly SessionSummary[]): void {
   const filter = document.createElement("input");
   filter.type = "search";
   filter.className = "session-filter";
-  filter.placeholder = "세션 필터 (파일명 또는 경로)";
+  filter.placeholder = "세션 필터 (제목, 파일명 또는 경로)";
   filter.setAttribute("aria-label", "세션 필터");
   filter.addEventListener("input", () => {
     for (const item of Array.from(
       list.querySelectorAll<HTMLElement>(".session-item"),
     )) {
-      item.hidden = !matchesQuery(item.dataset.label ?? "", filter.value);
+      item.hidden = !matchesQuery(item.dataset.filterText ?? "", filter.value);
     }
   });
   timelineEl.append(filter);
@@ -192,26 +193,21 @@ function renderSessionList(sessions: readonly SessionSummary[]): void {
     const failed = session.status === "failed";
     const item = document.createElement(failed ? "div" : "button");
     item.className = failed ? "session-item failed" : "session-item";
-    item.dataset.label = session.label;
+    item.dataset.filterText = `${session.label}\n${session.title ?? ""}`;
     if (item instanceof HTMLButtonElement) item.type = "button";
 
-    const label = document.createElement("span");
-    label.className = "session-label";
-    label.textContent = session.label;
-    label.title = session.label;
-    item.append(label);
+    const heading = document.createElement("span");
+    heading.className =
+      session.title !== null ? "session-title" : "session-label";
+    heading.textContent = session.title ?? session.label;
+    heading.title = session.title ?? session.label;
+    item.append(heading);
 
-    const meta = document.createElement("span");
-    meta.className = "session-meta muted";
-    meta.textContent = [
-      session.firstTimestamp ? formatTime(session.firstTimestamp) : "",
-      session.filteredNodeCount !== null
-        ? `${session.filteredNodeCount}개 노드`
-        : "",
-    ]
-      .filter(Boolean)
-      .join(" · ");
-    item.append(meta);
+    const sub = document.createElement("span");
+    sub.className = "session-meta muted";
+    sub.textContent = sessionSubline(session);
+    sub.title = session.label;
+    item.append(sub);
 
     if (failed) {
       const reason = document.createElement("span");

@@ -73,6 +73,26 @@ export function sortByRecency<T extends { firstTimestamp: string | null }>(
     .map(({ s }) => s);
 }
 
+/**
+ * 목록 항목 2줄째 문구. 1줄째가 라벨(제목 없음)이면 라벨을 반복하지 않는다.
+ * 실패한 세션은 시각 대신 호출자가 사유를 보여주므로 시각 부분을 넣지 않는다.
+ */
+export function sessionSubline(s: {
+  label: string;
+  title: string | null;
+  titleSource: "custom-title" | "ai-title" | "first-user-message" | null;
+  firstTimestamp: string | null;
+  status: "unread" | "ready" | "failed";
+}): string {
+  const parts: string[] = [];
+  if (s.title !== null) parts.push(s.label);
+  if (s.status !== "failed") {
+    parts.push(s.firstTimestamp ? formatTime(s.firstTimestamp) : "시각 없음");
+  }
+  if (s.titleSource === "first-user-message") parts.push("첫 메시지");
+  return parts.join(" · ");
+}
+
 /** 리터럴 부분 문자열 비교(대소문자 무시) — 정규식으로 해석하지 않는다. */
 export function matchesQuery(label: string, query: string): boolean {
   return label.toLowerCase().includes(query.toLowerCase());
