@@ -160,3 +160,7 @@ test("sessionSubline: 실패한 세션은 시각 부분을 넣지 않는다", ()
     "",
   );
 });
+
+test("sessionSubline: 제목 있는 실패 세션은 라벨만 보인다", () => {
+  assert.equal(sessionSubline({ ...base, status: "failed" }), "proj/a.jsonl");
+});

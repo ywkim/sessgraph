@@ -203,11 +203,14 @@ function renderSessionList(sessions: readonly SessionSummary[]): void {
     heading.title = session.title ?? session.label;
     item.append(heading);
 
-    const sub = document.createElement("span");
-    sub.className = "session-meta muted";
-    sub.textContent = sessionSubline(session);
-    sub.title = session.label;
-    item.append(sub);
+    const subline = sessionSubline(session);
+    if (subline) {
+      const sub = document.createElement("span");
+      sub.className = "session-meta muted";
+      sub.textContent = subline;
+      sub.title = session.label;
+      item.append(sub);
+    }
 
     if (failed) {
       const reason = document.createElement("span");

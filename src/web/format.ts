@@ -1,6 +1,8 @@
 // DOM에 의존하지 않는 순수 함수만 모은다 — node:test로 직접 단위 테스트할 수
 // 있다 (jsdom 등 추가 의존성 없이). DOM을 만지는 렌더링 코드는 app.ts에 남긴다.
 
+import type { SessionSummary } from "../core/types.js";
+
 /**
  * 본문 한 줄에서 사람이 읽을 부분만 뽑는다. 그래프 구조를 다시 계산하지는
  * 않는다 — 여기서 파싱하는 것은 표시용 텍스트뿐이다.
@@ -77,13 +79,12 @@ export function sortByRecency<T extends { firstTimestamp: string | null }>(
  * 목록 항목 2줄째 문구. 1줄째가 라벨(제목 없음)이면 라벨을 반복하지 않는다.
  * 실패한 세션은 시각 대신 호출자가 사유를 보여주므로 시각 부분을 넣지 않는다.
  */
-export function sessionSubline(s: {
-  label: string;
-  title: string | null;
-  titleSource: "custom-title" | "ai-title" | "first-user-message" | null;
-  firstTimestamp: string | null;
-  status: "unread" | "ready" | "failed";
-}): string {
+export function sessionSubline(
+  s: Pick<
+    SessionSummary,
+    "label" | "title" | "titleSource" | "firstTimestamp" | "status"
+  >,
+): string {
   const parts: string[] = [];
   if (s.title !== null) parts.push(s.label);
   if (s.status !== "failed") {
