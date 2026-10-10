@@ -4,6 +4,7 @@ import { createServer } from "node:http";
 import type { Server } from "node:http";
 import {
   appendFileSync,
+  chmodSync,
   copyFileSync,
   mkdtempSync,
   readFileSync,
@@ -625,4 +626,26 @@ test("serve: 기동 시 없던 파일이 나중에 생기면 복구된다", asyn
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }
+});
+
+test("serve: 메타 읽기 오류는 그 세션만 failed로 승격하고 복구되면 돌아온다", async (t) => {
+  if (process.getuid?.() === 0) {
+    t.skip("root는 chmod로 읽기를 막을 수 없다");
+    return;
+  }
+  await withTmpSession(`${userLine("질문")}\n`, async (list, file) => {
+    chmodSync(file, 0o000);
+    try {
+      const [bad] = await list();
+      assert.equal(bad!.status, "failed");
+      assert.match(bad!.failure ?? "", /EACCES|permission/i);
+      assert.equal(bad!.title, null);
+      assert.equal(bad!.firstTimestamp, null);
+    } finally {
+      chmodSync(file, 0o644);
+    }
+    const [ok] = await list();
+    assert.equal(ok!.status, "unread");
+    assert.equal(ok!.title, "질문");
+  });
 });

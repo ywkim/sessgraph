@@ -191,6 +191,8 @@ type SessionEntry = {
   meta?: { readonly snapshot: FileSnapshot; readonly value: SessionMeta };
 };
 
+const NOT_FOUND = "파일을 찾을 수 없습니다";
+
 /** 존재하는 경로만 등록한다. 등록 시점에 존재 여부를 확정하고, 내용은 읽지 않는다. */
 export function registerSessions(
   filePaths: readonly string[],
@@ -205,13 +207,11 @@ export function registerSessions(
       label,
       filePath,
       state: null,
-      failure: exists ? null : `파일을 찾을 수 없습니다: ${filePath}`,
+      failure: exists ? null : `${NOT_FOUND}: ${filePath}`,
     });
   }
   return registry;
 }
-
-const NOT_FOUND = "파일을 찾을 수 없습니다";
 
 /**
  * 목록 항목 하나를 만든다. 요청마다 파일을 stat해 존재를 확인하고(기동 뒤 삭제·
