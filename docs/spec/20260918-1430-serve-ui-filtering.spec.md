@@ -66,7 +66,7 @@ export interface SessionSummary {
 
 ### 반응형 처리
 
-JS에서 화면 폭을 재지 않는다. 좁은 화면 대응은 CSS 미디어 쿼리만 쓴다 (`@media (max-width: 480px)`에서 `.session-meta` 숨김). 렌더 시점에 폭을 읽지 않으므로 창 크기를 바꿔도 다시 그릴 필요가 없다.
+JS에서 화면 폭을 재지 않는다. 좁은 화면 대응은 CSS만 쓴다 (`.session-meta`는 줄바꿈하며 숨기지 않는다). 렌더 시점에 폭을 읽지 않으므로 창 크기를 바꿔도 다시 그릴 필요가 없다.
 
 **기존 Spec 기준(768px, basename + 상태 아이콘)에서 바꾼 이유:**
 
@@ -153,8 +153,8 @@ if (screenWidth < NARROW_THRESHOLD) {
 
 - **정렬:** `sortByRecency` (src/web/format.ts). `firstTimestamp` 내림차순이며, null이거나 해석할 수 없는 값은 맨 뒤에 입력 순서대로 둔다.
 - **항목:** `ready`/`unread`는 `button`, `failed`는 `div`다. 실패한 세션도 목록에 남기고 `failure` 사유를 `.warning`으로 보인다 (ADR-0004).
-- **표시:** 라벨(전체 경로, `title`로 호버 시 확인) + `.session-meta`(`formatTime(firstTimestamp)`). 값이 null인 항목은 생략한다. (노드 수 표시는 정정 참조)
-- **좁은 화면:** CSS(`@media (max-width: 480px)`)가 `.session-meta`를 숨기고 라벨을 줄바꿈한다. JS는 폭을 재지 않는다.
+- **표시:** 라벨(전체 경로, `title`로 호버 시 확인) + `.session-meta`(`formatTime(firstTimestamp)`, null이면 `시각 없음`). (노드 수 표시는 정정 참조)
+- **좁은 화면:** CSS가 제목·라벨·`.session-meta`를 줄바꿈한다. 2줄째는 식별 정보이므로 숨기지 않는다. JS는 폭을 재지 않는다.
 
 ### 필터
 
@@ -317,7 +317,7 @@ filteredNodeCount: number | null; // 기본 접힘이 아닌 노드 수. 인덱�
 
 - [x] 세션이 firstTimestamp 기준 내림차순 정렬 (null은 맨 뒤)
 - [x] 시각 메타 표시 (null이면 생략). 노드 수 표시는 정정에 따라 중단
-- [x] 좁은 화면(≤480px)에서 메타가 숨겨지고 가로 스크롤이 생기지 않음
+- [x] 좁은 화면(≤480px)에서 메타가 줄바꿈되어 모두 보이고 가로 스크롤이 생기지 않음
 - [ ] 호버(`title`)로 전체 경로 확인 가능
 - [x] 파일명 또는 경로로 필터 가능 (대소문자 무시)
 - [ ] 실패한 세션이 사유와 함께 목록에 남음

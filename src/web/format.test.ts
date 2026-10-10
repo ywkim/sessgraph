@@ -6,6 +6,7 @@ import {
   formatTime,
   escapeHtml,
   sortByRecency,
+  sessionSubline,
   matchesQuery,
 } from "./format.js";
 
@@ -109,4 +110,57 @@ test("matchesQuery: 대소문자 무시 리터럴 비교, 정규식 문자는 �
   assert.equal(matchesQuery("proj/a.b.jsonl", "a.b"), true);
   assert.equal(matchesQuery("proj/axb.jsonl", "a.b"), false);
   assert.equal(matchesQuery("anything", ""), true);
+});
+
+test("matchesQuery: label과 title을 이은 문자열에서 제목으로도 찾는다", () => {
+  assert.equal(matchesQuery("proj/a.jsonl\n결제 오류 수정", "결제"), true);
+  assert.equal(matchesQuery("proj/a.jsonl\n", "결제"), false);
+});
+
+const base = {
+  label: "proj/a.jsonl",
+  title: "제목",
+  titleSource: "ai-title" as const,
+  firstTimestamp: "2026-01-01T00:00:00Z",
+  status: "unread" as const,
+};
+
+test("sessionSubline: 제목이 있으면 라벨 · 시각을 보인다", () => {
+  const out = sessionSubline(base);
+  assert.ok(out.startsWith("proj/a.jsonl · 2026-"));
+  assert.ok(!out.includes("첫 메시지"));
+});
+
+test("sessionSubline: 제목이 없으면 라벨을 반복하지 않고, 시각이 없으면 '시각 없음'", () => {
+  assert.equal(
+    sessionSubline({
+      ...base,
+      title: null,
+      titleSource: null,
+      firstTimestamp: null,
+    }),
+    "시각 없음",
+  );
+});
+
+test("sessionSubline: 첫 메시지 출처는 라벨을 붙여 제목이 아님을 드러낸다", () => {
+  const out = sessionSubline({ ...base, titleSource: "first-user-message" });
+  assert.ok(out.endsWith(" · 첫 메시지"));
+});
+
+test("sessionSubline: 실패한 세션은 시각 부분을 넣지 않는다", () => {
+  assert.equal(
+    sessionSubline({
+      ...base,
+      title: null,
+      titleSource: null,
+      firstTimestamp: null,
+      status: "failed",
+    }),
+    "",
+  );
+});
+
+test("sessionSubline: 제목 있는 실패 세션은 라벨만 보인다", () => {
+  assert.equal(sessionSubline({ ...base, status: "failed" }), "proj/a.jsonl");
 });
