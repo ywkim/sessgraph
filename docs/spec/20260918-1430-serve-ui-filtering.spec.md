@@ -1,7 +1,7 @@
 ---
 slug: 20260918-1430-serve-ui-filtering
 status: Current
-updated: 2026-10-09
+updated: 2026-10-10
 related:
   prd: docs/prd/20260902-0420-serve-command.prd.md
   design: docs/design/20260904-1130-responsive-layout.tdd.md
@@ -147,11 +147,13 @@ if (screenWidth < NARROW_THRESHOLD) {
 
 ## 세션 목록 렌더링
 
+> **정정 (2026-10-10):** 목록의 노드 수 표시(`N개 노드`)는 [세션 목록 Spec](20261010-0135-serve-session-list.spec.md) 제6항에 따라 중단한다. 이 절의 노드 수 표시, 아래 "filteredNodeCount가 null인 경우"의 목록 표시 부분, 성공 기준의 노드 수 항목은 그 결정으로 대체된다. `filteredNodeCount` 필드는 API에 그대로 남는다.
+
 `renderSessionList(sessions)` (src/web/app.ts)가 담당한다.
 
 - **정렬:** `sortByRecency` (src/web/format.ts). `firstTimestamp` 내림차순이며, null이거나 해석할 수 없는 값은 맨 뒤에 입력 순서대로 둔다.
 - **항목:** `ready`/`unread`는 `button`, `failed`는 `div`다. 실패한 세션도 목록에 남기고 `failure` 사유를 `.warning`으로 보인다 (ADR-0004).
-- **표시:** 라벨(전체 경로, `title`로 호버 시 확인) + `.session-meta`(`formatTime(firstTimestamp)` · `N개 노드`). 값이 null인 항목은 해당 부분을 생략한다.
+- **표시:** 라벨(전체 경로, `title`로 호버 시 확인) + `.session-meta`(`formatTime(firstTimestamp)`). 값이 null인 항목은 생략한다. (노드 수 표시는 정정 참조)
 - **좁은 화면:** CSS(`@media (max-width: 480px)`)가 `.session-meta`를 숨기고 라벨을 줄바꿈한다. JS는 폭을 재지 않는다.
 
 ### 필터
@@ -314,7 +316,7 @@ filteredNodeCount: number | null; // 기본 접힘이 아닌 노드 수. 인덱�
 ### 세션 목록
 
 - [x] 세션이 firstTimestamp 기준 내림차순 정렬 (null은 맨 뒤)
-- [x] 시각과 노드 수 메타 표시 (null이면 생략)
+- [x] 시각 메타 표시 (null이면 생략). 노드 수 표시는 정정에 따라 중단
 - [x] 좁은 화면(≤480px)에서 메타가 숨겨지고 가로 스크롤이 생기지 않음
 - [ ] 호버(`title`)로 전체 경로 확인 가능
 - [x] 파일명 또는 경로로 필터 가능 (대소문자 무시)
