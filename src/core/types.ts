@@ -381,6 +381,12 @@ export interface SessionSummary {
   readonly firstTimestamp: string | null;
   /** 기본 접힘이 아닌 노드 수. 아직 인덱싱 전이거나 실패한 세션은 null — 목록을 위해 전부 인덱싱하지 않는다 */
   readonly filteredNodeCount: number | null;
+  /** 정규화된 제목, 또는 첫 메시지. 없거나 실패한 세션은 null */
+  readonly title: string | null;
+  /** `title === null` ⇔ `titleSource === null` */
+  readonly titleSource: TitleSource | null;
+  /** 파일 mtime(ISO 8601). 실패한 세션만 null */
+  readonly lastModifiedAt: string | null;
 }
 
 /* ── search (docs/spec/20260906-0900-body-search.spec.md) ─────────────────── */

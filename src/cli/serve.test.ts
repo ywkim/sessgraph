@@ -4,9 +4,11 @@ import { createServer } from "node:http";
 import type { Server } from "node:http";
 import {
   appendFileSync,
+  chmodSync,
   copyFileSync,
   mkdtempSync,
   readFileSync,
+  renameSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -15,10 +17,8 @@ import { fileURLToPath } from "node:url";
 
 import { buildIndexDetailed } from "../core/build-index.js";
 import {
-  FIRST_TIMESTAMP_SCAN_BYTES,
   createRequestHandler,
   isStale,
-  readFirstTimestamp,
   registerSessions,
   runServe,
   sessionIdOf,
@@ -532,102 +532,120 @@ test("runServe: 포트가 사용 중이면 다른 포트를 고르지 않고 종
   }
 });
 
-function tmpJsonl(content: string): string {
-  const dir = mkdtempSync(path.join(tmpdir(), "sessgraph-first-ts-"));
+async function withTmpSession(
+  content: string,
+  body: (list: () => Promise<SessionSummary[]>, file: string) => Promise<void>,
+): Promise<void> {
+  const dir = mkdtempSync(path.join(tmpdir(), "sessgraph-meta-"));
   const file = path.join(dir, "session.jsonl");
   writeFileSync(file, content);
-  return file;
+  const server: Server = createServer(
+    createRequestHandler(registerSessions([file])),
+  );
+  await new Promise<void>((resolve) =>
+    server.listen(0, "127.0.0.1", () => resolve()),
+  );
+  const address = server.address();
+  const port = typeof address === "object" && address ? address.port : 0;
+  const list = async () =>
+    (await (
+      await fetch(`http://127.0.0.1:${port}/api/sessions`)
+    ).json()) as SessionSummary[];
+  try {
+    await body(list, file);
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
 }
 
-const line = (n: number, timestamp?: string): string =>
-  JSON.stringify({
-    uuid: U(n),
-    parentUuid: null,
-    type: "user",
-    ...(timestamp ? { timestamp } : {}),
+const userLine = (text: string, ts = "2026-01-01T00:00:01.000Z") =>
+  JSON.stringify({ type: "user", timestamp: ts, message: { content: text } });
+
+test("serve: /api/sessions는 제목·출처·lastModifiedAt을 돌려준다", async () => {
+  await withTmpSession(`${userLine("시작 질문")}\n`, async (list) => {
+    const [s] = await list();
+    assert.equal(s!.title, "시작 질문");
+    assert.equal(s!.titleSource, "first-user-message");
+    assert.match(s!.lastModifiedAt ?? "", /^\d{4}-\d{2}-\d{2}T/);
   });
-
-test("readFirstTimestamp: 첫 timestamp 문자열을 돌려준다", () => {
-  const file = tmpJsonl(`${line(1, "2026-01-01T00:00:01.000Z")}\n${line(2)}\n`);
-  assert.equal(readFirstTimestamp(file), "2026-01-01T00:00:01.000Z");
 });
 
-test("readFirstTimestamp: timestamp 없는 줄은 건너뛰고 다음 줄 값을 찾는다", () => {
-  const file = tmpJsonl(`${line(1)}\n${line(2, "2026-01-02T00:00:00.000Z")}\n`);
-  assert.equal(readFirstTimestamp(file), "2026-01-02T00:00:00.000Z");
-});
-
-test("readFirstTimestamp: 깨진 JSON 줄은 건너뛰고 다음 줄 값을 찾는다", () => {
-  const file = tmpJsonl(`{not json\n${line(2, "2026-01-03T00:00:00.000Z")}\n`);
-  assert.equal(readFirstTimestamp(file), "2026-01-03T00:00:00.000Z");
-});
-
-test("readFirstTimestamp: timestamp가 문자열이 아니면 건너뛴다", () => {
-  const bad = JSON.stringify({ uuid: U(1), timestamp: 12345 });
-  const file = tmpJsonl(`${bad}\n${line(2, "2026-01-04T00:00:00.000Z")}\n`);
-  assert.equal(readFirstTimestamp(file), "2026-01-04T00:00:00.000Z");
-});
-
-test("readFirstTimestamp: 메시지가 없으면 snapshot.timestamp를 쓴다", () => {
-  const snap = JSON.stringify({
-    type: "file-history-snapshot",
-    messageId: U(1),
-    snapshot: { messageId: U(1), timestamp: "2026-01-08T00:00:00.000Z" },
+test("serve: 파일 끝에 제목이 추가되면 지문이 바뀌어 제목이 갱신된다", async () => {
+  await withTmpSession(`${userLine("질문")}\n`, async (list, file) => {
+    assert.equal((await list())[0]!.titleSource, "first-user-message");
+    appendFileSync(
+      file,
+      `${JSON.stringify({ type: "ai-title", aiTitle: "새 제목" })}\n`,
+    );
+    const [s] = await list();
+    assert.equal(s!.title, "새 제목");
+    assert.equal(s!.titleSource, "ai-title");
   });
-  const summary = JSON.stringify({
-    type: "summary",
-    summary: "x",
-    leafUuid: U(9),
+});
+
+test("serve: 기동 뒤 파일이 사라지면 failed, 돌아오면 복구된다", async () => {
+  await withTmpSession(`${userLine("질문")}\n`, async (list, file) => {
+    const moved = `${file}.moved`;
+    renameSync(file, moved);
+    const [gone] = await list();
+    assert.equal(gone!.status, "failed");
+    assert.match(gone!.failure ?? "", /파일을 찾을 수 없습니다/);
+    assert.equal(gone!.title, null);
+    assert.equal(gone!.titleSource, null);
+    assert.equal(gone!.lastModifiedAt, null);
+    assert.equal(gone!.firstTimestamp, null);
+
+    renameSync(moved, file);
+    const [back] = await list();
+    assert.equal(back!.status, "unread");
+    assert.equal(back!.title, "질문");
   });
-  const file = tmpJsonl(`${summary}\n${snap}\n`);
-  assert.equal(readFirstTimestamp(file), "2026-01-08T00:00:00.000Z");
 });
 
-test("readFirstTimestamp: 최상위 timestamp와 snapshot.timestamp 중 먼저 나온 줄을 쓴다", () => {
-  const snap = JSON.stringify({
-    type: "file-history-snapshot",
-    snapshot: { timestamp: "2026-01-09T00:00:00.000Z" },
+test("serve: 기동 시 없던 파일이 나중에 생기면 복구된다", async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "sessgraph-meta-"));
+  const file = path.join(dir, "late.jsonl");
+  const server: Server = createServer(
+    createRequestHandler(registerSessions([file])),
+  );
+  await new Promise<void>((resolve) =>
+    server.listen(0, "127.0.0.1", () => resolve()),
+  );
+  const address = server.address();
+  const port = typeof address === "object" && address ? address.port : 0;
+  try {
+    const get = async () =>
+      (await (
+        await fetch(`http://127.0.0.1:${port}/api/sessions`)
+      ).json()) as SessionSummary[];
+    assert.equal((await get())[0]!.status, "failed");
+    writeFileSync(file, `${userLine("늦은 질문")}\n`);
+    const [s] = await get();
+    assert.equal(s!.status, "unread");
+    assert.equal(s!.title, "늦은 질문");
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+});
+
+test("serve: 메타 읽기 오류는 그 세션만 failed로 승격하고 복구되면 돌아온다", async (t) => {
+  if (process.getuid?.() === 0) {
+    t.skip("root는 chmod로 읽기를 막을 수 없다");
+    return;
+  }
+  await withTmpSession(`${userLine("질문")}\n`, async (list, file) => {
+    chmodSync(file, 0o000);
+    try {
+      const [bad] = await list();
+      assert.equal(bad!.status, "failed");
+      assert.match(bad!.failure ?? "", /EACCES|permission/i);
+      assert.equal(bad!.title, null);
+      assert.equal(bad!.firstTimestamp, null);
+    } finally {
+      chmodSync(file, 0o644);
+    }
+    const [ok] = await list();
+    assert.equal(ok!.status, "unread");
+    assert.equal(ok!.title, "질문");
   });
-  const file = tmpJsonl(`${snap}\n${line(1, "2026-01-09T00:00:05.000Z")}\n`);
-  assert.equal(readFirstTimestamp(file), "2026-01-09T00:00:00.000Z");
-});
-
-test("readFirstTimestamp: snapshot이 null이거나 timestamp가 문자열이 아니면 건너뛴다", () => {
-  const a = JSON.stringify({ type: "file-history-snapshot", snapshot: null });
-  const b = JSON.stringify({ snapshot: { timestamp: 1 } });
-  const file = tmpJsonl(`${a}\n${b}\n${line(1, "2026-01-10T00:00:00.000Z")}\n`);
-  assert.equal(readFirstTimestamp(file), "2026-01-10T00:00:00.000Z");
-});
-
-test("readFirstTimestamp: 빈 파일이거나 timestamp가 전혀 없으면 null", () => {
-  assert.equal(readFirstTimestamp(tmpJsonl("")), null);
-  assert.equal(readFirstTimestamp(tmpJsonl(`${line(1)}\n${line(2)}\n`)), null);
-});
-
-test("readFirstTimestamp: 존재하지 않는 파일은 null", () => {
-  const file = tmpJsonl("");
-  assert.equal(readFirstTimestamp(`${file}.missing`), null);
-});
-
-test("readFirstTimestamp: 창 경계에서 잘린 마지막 줄은 버리고 앞 줄 값을 쓴다", () => {
-  const first = line(1, "2026-01-05T00:00:00.000Z");
-  const pad = "x".repeat(FIRST_TIMESTAMP_SCAN_BYTES - first.length - 1);
-  // 창 끝에 걸친 두 번째 줄은 잘려 깨진 JSON이 된다 — 완결된 첫 줄만 쓴다
-  const cut = JSON.stringify({
-    uuid: U(2),
-    pad,
-    timestamp: "2099-01-01T00:00:00.000Z",
-  });
-  const file = tmpJsonl(`${first}\n${cut}\n`);
-  assert.equal(readFirstTimestamp(file), "2026-01-05T00:00:00.000Z");
-});
-
-test("readFirstTimestamp: 창 안에서 끝나지 않는 첫 줄은 null", () => {
-  const huge = JSON.stringify({
-    uuid: U(1),
-    pad: "x".repeat(FIRST_TIMESTAMP_SCAN_BYTES),
-    timestamp: "2026-01-06T00:00:00.000Z",
-  });
-  const file = tmpJsonl(`${huge}\n${line(2, "2026-01-07T00:00:00.000Z")}\n`);
-  assert.equal(readFirstTimestamp(file), null);
 });
