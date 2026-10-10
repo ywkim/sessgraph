@@ -124,4 +124,55 @@ describe("readSessionMeta", () => {
   it("읽기 오류는 throw한다", () => {
     assert.throws(() => readSessionMeta(path.join(dir, "없음.jsonl")));
   });
+
+  it("앞 창의 custom-title이 뒤 창의 ai-title보다 우선한다", () => {
+    const big = filler(META_WINDOW_BYTES);
+    const f = write([
+      { type: "custom-title", customTitle: "직접 지음" },
+      big,
+      big,
+      { type: "ai-title", aiTitle: "AI" },
+    ]);
+    const m = readSessionMeta(f);
+    assert.equal(m.title, "직접 지음");
+    assert.equal(m.titleSource, "custom-title");
+  });
+
+  it("뒤 창 시작이 줄 경계이면 그 줄을 버리지 않는다", () => {
+    const base = { type: "ai-title", aiTitle: "경계", pad: "" };
+    const overhead = Buffer.byteLength(JSON.stringify(base)) + 1;
+    const last = JSON.stringify({
+      ...base,
+      pad: "p".repeat(META_WINDOW_BYTES - overhead),
+    });
+    assert.equal(Buffer.byteLength(last) + 1, META_WINDOW_BYTES);
+    const file = path.join(dir, `s${n++}.jsonl`);
+    writeFileSync(
+      file,
+      JSON.stringify(filler(META_WINDOW_BYTES)) + "\n" + last + "\n",
+    );
+    assert.equal(readSessionMeta(file).title, "경계");
+  });
+
+  it("정확히 창 크기이고 개행 없는 파일의 마지막 줄을 버리지 않는다", () => {
+    const base = { type: "ai-title", aiTitle: "끝줄", pad: "" };
+    const overhead = Buffer.byteLength(JSON.stringify(base));
+    const last = JSON.stringify({
+      ...base,
+      pad: "p".repeat(META_WINDOW_BYTES - overhead),
+    });
+    assert.equal(Buffer.byteLength(last), META_WINDOW_BYTES);
+    const file = path.join(dir, `s${n++}.jsonl`);
+    writeFileSync(file, last);
+    assert.equal(readSessionMeta(file).title, "끝줄");
+  });
+
+  it("isMeta와 < 로 시작하는 user 메시지는 건너뛴다", () => {
+    const f = write([
+      { ...user("메타 문구"), isMeta: true },
+      user("<command-name>/clear</command-name>"),
+      user("진짜 질문"),
+    ]);
+    assert.equal(readSessionMeta(f).title, "진짜 질문");
+  });
 });

@@ -19,20 +19,14 @@ type Rec = {
   snapshot?: { timestamp?: unknown } | null;
   customTitle?: unknown;
   aiTitle?: unknown;
+  isMeta?: unknown;
   message?: { content?: unknown } | null;
 };
 
-function readWindow(
-  fd: number,
-  position: number,
-  length: number,
-): { text: string; truncatedTail: boolean } {
+function readWindow(fd: number, position: number, length: number): string {
   const buf = Buffer.alloc(length);
   const read = readSync(fd, buf, 0, length, position);
-  return {
-    text: buf.subarray(0, read).toString("utf8"),
-    truncatedTail: read === length,
-  };
+  return buf.subarray(0, read).toString("utf8");
 }
 
 function parseLines(lines: string[]): Rec[] {
@@ -90,9 +84,10 @@ function lastTitle(recs: Rec[], type: string, field: keyof Rec): string | null {
 
 function firstUserMessage(recs: Rec[]): string | null {
   for (const rec of recs) {
-    if (rec.type !== "user") continue;
+    if (rec.type !== "user" || rec.isMeta === true) continue;
     const text = userText(rec);
-    if (text) return text;
+    // `<`로 시작하면 명령 envelope·시스템 주입이다
+    if (text && !text.startsWith("<")) return text;
   }
   return null;
 }
@@ -106,39 +101,34 @@ export function readSessionMeta(filePath: string): SessionMeta {
   const fd = openSync(filePath, "r");
   try {
     const size = fstatSync(fd).size;
-    const head = readWindow(fd, 0, META_WINDOW_BYTES);
-    const headLines = head.text.split("\n");
-    // 창이 가득 찼으면 마지막 조각은 잘렸을 수 있다
-    if (head.truncatedTail) headLines.pop();
+    const headLines = readWindow(fd, 0, META_WINDOW_BYTES).split("\n");
+    // 파일이 창보다 길면 마지막 조각은 잘렸을 수 있다
+    if (size > META_WINDOW_BYTES) headLines.pop();
     const headRecs = parseLines(headLines);
 
     let tailRecs = headRecs;
     if (size > META_WINDOW_BYTES) {
-      const tail = readWindow(fd, size - META_WINDOW_BYTES, META_WINDOW_BYTES);
-      const tailLines = tail.text.split("\n");
-      tailLines.shift(); // 창 시작이 줄 중간일 수 있다
+      // 창 시작 직전 1바이트까지 읽어 시작이 줄 경계인지 판단한다
+      const start = size - META_WINDOW_BYTES;
+      const tailLines = readWindow(fd, start - 1, META_WINDOW_BYTES + 1).split(
+        "\n",
+      );
+      tailLines.shift(); // 직전 바이트가 개행이면 빈 조각, 아니면 잘린 줄
       tailRecs = parseLines(tailLines);
     }
 
-    const custom = lastTitle(tailRecs, "custom-title", "customTitle");
+    const firstTimestamp = firstTimestampOf(headRecs);
+    const custom =
+      lastTitle(tailRecs, "custom-title", "customTitle") ??
+      lastTitle(headRecs, "custom-title", "customTitle");
     if (custom) {
-      return {
-        firstTimestamp: firstTimestampOf(headRecs),
-        title: custom,
-        titleSource: "custom-title",
-      };
+      return { firstTimestamp, title: custom, titleSource: "custom-title" };
     }
     const ai = lastTitle(tailRecs, "ai-title", "aiTitle");
-    if (ai) {
-      return {
-        firstTimestamp: firstTimestampOf(headRecs),
-        title: ai,
-        titleSource: "ai-title",
-      };
-    }
+    if (ai) return { firstTimestamp, title: ai, titleSource: "ai-title" };
     const first = firstUserMessage(headRecs);
     return {
-      firstTimestamp: firstTimestampOf(headRecs),
+      firstTimestamp,
       title: first,
       titleSource: first ? "first-user-message" : null,
     };
