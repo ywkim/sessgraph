@@ -7,6 +7,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 
+import { readSessionMeta } from "../core/session-meta.js";
+import type { SessionMeta } from "../core/session-meta.js";
 import { buildIndexDetailed } from "../core/build-index.js";
 import { attributeMatches, scanFile } from "../core/search.js";
 import { buildSegmentDetail, isCollapsedByDefault } from "../core/serve.js";
@@ -185,51 +187,9 @@ type SessionEntry = {
   readonly filePath: string;
   state: IndexState | null;
   failure: string | null;
-  /** 앞부분 스캔 결과 캐시. undefined = 아직 안 읽음, null = 찾지 못함 */
-  firstTimestamp?: string | null;
+  /** 목록용 메타 캐시. 파일 지문이 바뀌면 다시 읽는다 */
+  meta?: { readonly snapshot: FileSnapshot; readonly value: SessionMeta };
 };
-
-export const FIRST_TIMESTAMP_SCAN_BYTES = 64 * 1024;
-
-/**
- * 파일 앞 64KB의 완결된 줄에서 가장 앞선 timestamp를 찾는다. 전체 인덱싱 없이
- * 세션 목록을 정렬하기 위한 값이다. 메시지 줄의 최상위 `timestamp`를 쓰고,
- * 메시지가 없는 파일(`file-history-snapshot`만 있는 세션)은 그 줄의
- * `snapshot.timestamp`를 쓴다. 못 찾거나 읽지 못하면 null.
- */
-export function readFirstTimestamp(filePath: string): string | null {
-  let fd: number;
-  try {
-    fd = openSync(filePath, "r");
-  } catch {
-    return null;
-  }
-  try {
-    const buf = Buffer.alloc(FIRST_TIMESTAMP_SCAN_BYTES);
-    const read = readSync(fd, buf, 0, buf.length, 0);
-    const lines = buf.subarray(0, read).toString("utf8").split("\n");
-    // 마지막 조각은 잘렸을 수 있다. 파일이 창보다 짧으면 완결된 줄이다.
-    if (read === buf.length) lines.pop();
-    for (const line of lines) {
-      if (!line) continue;
-      try {
-        const parsed = JSON.parse(line) as {
-          timestamp?: unknown;
-          snapshot?: { timestamp?: unknown } | null;
-        } | null;
-        const ts = parsed?.timestamp ?? parsed?.snapshot?.timestamp;
-        if (typeof ts === "string") return ts;
-      } catch {
-        // 깨진 줄은 건너뛴다 — 목록 정렬용 값일 뿐 판정에 쓰지 않는다
-      }
-    }
-    return null;
-  } catch {
-    return null;
-  } finally {
-    closeSync(fd);
-  }
-}
 
 /** 존재하는 경로만 등록한다. 등록 시점에 존재 여부를 확정하고, 내용은 읽지 않는다. */
 export function registerSessions(
@@ -251,11 +211,40 @@ export function registerSessions(
   return registry;
 }
 
+const NOT_FOUND = "파일을 찾을 수 없습니다";
+
+/**
+ * 목록 항목 하나를 만든다. 요청마다 파일을 stat해 존재를 확인하고(기동 뒤 삭제·
+ * 복구를 반영), 지문이 바뀐 경우에만 메타를 다시 읽는다. 읽기 오류는 이 세션을
+ * 실패로 승격한다 — 빈 값으로 채우지 않는다.
+ */
 function summaryOf(entry: SessionEntry): SessionSummary {
-  const failed = entry.failure !== null;
-  if (!failed && entry.firstTimestamp === undefined) {
-    entry.firstTimestamp = readFirstTimestamp(entry.filePath);
+  let snapshot: FileSnapshot | null = null;
+  let failure = entry.failure;
+  try {
+    snapshot = snapshotOf(entry.filePath);
+    if (failure?.startsWith(NOT_FOUND)) failure = entry.failure = null;
+  } catch (err) {
+    failure =
+      (err as NodeJS.ErrnoException).code === "ENOENT"
+        ? `${NOT_FOUND}: ${entry.filePath}`
+        : (err as Error).message;
   }
+
+  let meta: SessionMeta | null = null;
+  if (failure === null && snapshot) {
+    if (!entry.meta || isStale(snapshot, entry.meta.snapshot)) {
+      try {
+        entry.meta = { snapshot, value: readSessionMeta(entry.filePath) };
+      } catch (err) {
+        delete entry.meta;
+        failure = (err as Error).message;
+      }
+    }
+    meta = entry.meta?.value ?? null;
+  }
+
+  const failed = failure !== null;
   let filteredNodeCount: number | null = null;
   if (!failed && entry.state) {
     filteredNodeCount = 0;
@@ -267,9 +256,13 @@ function summaryOf(entry: SessionEntry): SessionSummary {
     id: entry.id,
     label: entry.label,
     status: failed ? "failed" : entry.state ? "ready" : "unread",
-    failure: entry.failure,
-    firstTimestamp: failed ? null : (entry.firstTimestamp ?? null),
+    failure,
+    firstTimestamp: meta?.firstTimestamp ?? null,
     filteredNodeCount,
+    title: meta?.title ?? null,
+    titleSource: meta?.titleSource ?? null,
+    lastModifiedAt:
+      snapshot && !failed ? new Date(snapshot.mtimeMs).toISOString() : null,
   };
 }
 
