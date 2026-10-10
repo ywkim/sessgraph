@@ -20,6 +20,7 @@ export type RecordType =
   | "file-history-snapshot"
   | "queue-operation"
   | "custom-title"
+  | "ai-title"
   | "agent-name"
   | "last-prompt"
   | "bridge-session"
@@ -360,6 +361,9 @@ export interface NodeBody {
   /** 원본 JSONL 한 줄 (파싱하지 않은 그대로) */
   readonly raw: string;
 }
+
+/** 목록 제목의 출처. `first-user-message`는 제목이 아니라 시작 질문이다 */
+export type TitleSource = "custom-title" | "ai-title" | "first-user-message";
 
 /**
  * `/api/sessions`가 응답하는 목록 항목 하나
