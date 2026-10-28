@@ -7,6 +7,8 @@
  * 필드를 추가할 때는 그 필드가 사라졌을 때의 동작도 함께 정의한다.
  */
 
+import type { SearchTier } from "./search-text.js";
+
 /**
  * 관측된 레코드 타입. 이 목록에 없는 값이 나와도 파싱은 실패하지 않되,
  * 스키마 변경 신호로 보고한다.
@@ -389,17 +391,7 @@ export interface SessionSummary {
   readonly lastModifiedAt: string | null;
 }
 
-/* ── search (docs/spec/20260906-0900-body-search.spec.md) ─────────────────── */
-
-/** 스캔 1·2단계의 산출 — 인덱스를 아직 보지 않은 상태. */
-export interface RawMatch {
-  /** 매치가 시작하는 파일 바이트 오프셋 */
-  readonly byteOffset: number;
-  /** 매치가 든 줄에서 얻은 uuid. 줄이 JSON이 아니거나 uuid가 없으면 null */
-  readonly uuid: string | null;
-  /** 매치 주변 발췌 (Spec "발췌") */
-  readonly excerpt: string;
-}
+/* ── search (docs/spec/20261015-1821-search-index.spec.md) ────────────────── */
 
 /**
  * 매치를 어느 노드에 귀속시켰는지.
@@ -423,22 +415,52 @@ export type MatchAttribution =
   /** 줄에 uuid가 없거나 줄을 해석하지 못했다 */
   | { readonly kind: "none" };
 
+export interface IndexStatus {
+  /** 등록된 세션이 모두 한 번 이상 동기화를 마쳤는가 */
+  readonly ready: boolean;
+  readonly indexedSessions: number;
+  readonly totalSessions: number;
+  /** 동기화에 실패한 세션 */
+  readonly failed: readonly {
+    readonly sessionId: string;
+    readonly reason: string;
+  }[];
+  /** 대화 레코드가 있는데 색인할 대화 텍스트가 하나도 없는 세션 (Spec "불변식") */
+  readonly suspect: readonly string[];
+}
+
 export interface SearchMatch {
-  readonly byteOffset: number;
+  readonly tier: SearchTier;
+  readonly timestamp: string | null;
   readonly excerpt: string;
   readonly attribution: MatchAttribution;
 }
 
-export interface SearchResult {
-  readonly query: string;
+export interface SessionHits {
+  readonly sessionId: string;
+  readonly bestTier: SearchTier;
+  readonly latestAt: string | null;
+  readonly matchCount: number;
   readonly matches: readonly SearchMatch[];
-  /** 매치 상한에 걸려 스캔을 중단했으면 true */
-  readonly truncated: boolean;
+}
+
+/** `/api/search` */
+export interface SearchResponse {
+  readonly query: string;
+  readonly index: IndexStatus;
+  readonly sessions: readonly SessionHits[];
+  /** 매치가 있는 세션이 50개를 넘어 잘렸으면 true */
+  readonly truncatedSessions: boolean;
   readonly durationMs: number;
 }
 
-/** `/api/search`의 항목 하나. result와 failure는 정확히 한쪽만 non-null이다 */
-export type SessionSearchResult = { readonly sessionId: string } & (
-  | { readonly result: SearchResult; readonly failure: null }
-  | { readonly result: null; readonly failure: string }
-);
+/** `/api/session/:id/search` */
+export interface SessionSearchResponse {
+  readonly query: string;
+  readonly index: IndexStatus;
+  readonly matchCount: number;
+  readonly matches: readonly SearchMatch[];
+  /** `matchCount > matches.length` */
+  readonly truncated: boolean;
+  readonly durationMs: number;
+}

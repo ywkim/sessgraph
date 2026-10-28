@@ -175,6 +175,14 @@ export const COMMANDS: readonly CommandDescriptor[] = [
         description:
           "바인딩할 포트. 사용 중이면 다른 포트를 자동 선택하지 않고 오류로 종료한다",
       },
+      {
+        name: "cache-dir",
+        type: "string",
+        required: false,
+        default: null,
+        description:
+          "검색 색인을 둘 디렉터리. 없으면 $XDG_CACHE_HOME/sessgraph, XDG_CACHE_HOME이 없으면 ~/.cache/sessgraph",
+      },
     ],
     example: "sessgraph serve session.jsonl --port 7377",
   },

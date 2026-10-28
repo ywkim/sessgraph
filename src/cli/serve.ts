@@ -3,6 +3,7 @@ import { closeSync, existsSync, openSync, readSync, statSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { homedir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
@@ -10,17 +11,20 @@ import { parseArgs } from "node:util";
 import { readSessionMeta } from "../core/session-meta.js";
 import type { SessionMeta } from "../core/session-meta.js";
 import { buildIndexDetailed } from "../core/build-index.js";
-import { attributeMatches, scanFile } from "../core/search.js";
+import { attributeOne } from "../core/search.js";
 import { buildSegmentDetail, isCollapsedByDefault } from "../core/serve.js";
 import type {
   IndexResult,
+  IndexStatus,
   NodeIndex,
   NodeBody,
-  RawMatch,
-  SearchResult,
-  SessionSearchResult,
+  SearchMatch,
+  SearchResponse,
+  SessionSearchResponse,
   SessionSummary,
 } from "../core/types.js";
+import { SearchIndexClient, SearchIndexError } from "./search-index/client.js";
+import type { IndexProgress, WorkerMatch } from "./search-index/protocol.js";
 
 /** Spec "Interface" — 지정 포트가 사용 중이어도 다른 포트를 고르지 않는다. */
 export const DEFAULT_PORT = 7377;
@@ -75,54 +79,13 @@ export function isStale(
   );
 }
 
-/** Spec "성능 요구사항" — 상한이 없으면 흔한 문구 하나로 메모리가 무너진다. */
-const SEARCH_MAX_MATCHES = 1000;
+/** Spec "HTTP 엔드포인트" — 검색어 상한(코드 포인트). */
+const MAX_QUERY_CODE_POINTS = 1000;
 
-/**
- * `scanFile` + `attributeMatches`를 감싸 파일 변경 감지를 더한다.
- *
- * `ensureFresh`는 요청 시작 시점의 인덱스만 최신으로 맞춘다. 스캔 자체는
- * 수백 ms 걸릴 수 있어(`/body`의 단일 seek보다 넓은 창) 스캔 전후의
- * `{ino, size, mtimeMs}`를 다시 비교한다 — 부분 결과를 정상인 것처럼
- * 돌려주지 않는다 (Spec "파일 변경").
- */
-function runSearch(
-  filePath: string,
-  index: IndexResult,
-  nodes: ReadonlyMap<string, NodeIndex>,
-  snapshot: FileSnapshot,
-  query: string,
-):
-  | { readonly result: SearchResult }
-  | { readonly status: number; readonly error: string } {
-  const start = performance.now();
-  let scan: {
-    readonly matches: readonly RawMatch[];
-    readonly truncated: boolean;
-  };
-  try {
-    scan = scanFile(filePath, query, SEARCH_MAX_MATCHES);
-  } catch {
-    return {
-      status: 409,
-      error: "파일이 변경되었습니다. 잠시 후 다시 시도하세요",
-    };
-  }
-  if (currentlyStale(filePath, snapshot)) {
-    return {
-      status: 409,
-      error: "파일이 변경되었습니다. 잠시 후 다시 시도하세요",
-    };
-  }
-  const matches = attributeMatches(index, nodes, scan.matches);
-  return {
-    result: {
-      query,
-      matches,
-      truncated: scan.truncated,
-      durationMs: performance.now() - start,
-    },
-  };
+/** Spec "`serve` 옵션" — `$XDG_CACHE_HOME/sessgraph`, 없으면 `~/.cache/sessgraph`. */
+export function defaultCacheDir(env: NodeJS.ProcessEnv = process.env): string {
+  const base = env.XDG_CACHE_HOME || path.join(homedir(), ".cache");
+  return path.join(base, "sessgraph");
 }
 
 function currentlyStale(filePath: string, baseline: FileSnapshot): boolean {
@@ -307,7 +270,11 @@ function ensureFresh(
  */
 export function createRequestHandler(
   registry: Map<string, SessionEntry>,
+  search: SearchIndexClient | null = null,
 ): (req: IncomingMessage, res: ServerResponse) => void {
+  const byPath = new Map<string, SessionEntry>();
+  for (const entry of registry.values()) byPath.set(entry.filePath, entry);
+
   return (req, res) => {
     // ADR-0003: 쓰기 API를 갖지 않는다. 경로 존재 여부와 무관하게 405다 —
     // 어떤 경로가 쓰기를 받는지 탐색당하지 않기 위해서다.
@@ -325,47 +292,32 @@ export function createRequestHandler(
       return;
     }
 
-    // Spec "Interface" — /api/sessions와 같은 순서로 세션당 한 항목씩,
-    // 한 세션의 실패가 다른 세션의 결과를 지우지 않는다.
     if (url.pathname === "/api/search") {
-      const q = url.searchParams.get("q");
-      if (!q) {
-        sendJson(res, 400, { error: "검색어가 필요합니다" });
-        return;
-      }
-      const results: SessionSearchResult[] = [];
-      for (const entry of registry.values()) {
-        const fresh = ensureFresh(entry);
-        if ("error" in fresh) {
-          results.push({
+      const q = validQuery(url, res);
+      if (q === null) return;
+      void respondSearch(res, search, async (client) => {
+        const start = performance.now();
+        const r = await client.searchAll(q);
+        const failed: IndexStatus["failed"][number][] = [];
+        const sessions = r.sessions.map((hits) => {
+          const entry = byPath.get(hits.path)!;
+          return {
             sessionId: entry.id,
-            result: null,
-            failure: fresh.error,
-          });
-          continue;
-        }
-        const outcome = runSearch(
-          entry.filePath,
-          fresh.state.index,
-          fresh.state.nodes,
-          fresh.state.snapshot,
-          q,
-        );
-        if ("result" in outcome) {
-          results.push({
-            sessionId: entry.id,
-            result: outcome.result,
-            failure: null,
-          });
-        } else {
-          results.push({
-            sessionId: entry.id,
-            result: null,
-            failure: outcome.error,
-          });
-        }
-      }
-      sendJson(res, 200, results);
+            bestTier: hits.bestTier,
+            latestAt: hits.latestAt,
+            matchCount: hits.matchCount,
+            matches: attribute(entry, hits.matches, failed),
+          };
+        });
+        const body: SearchResponse = {
+          query: q,
+          index: indexStatus(r.index, byPath, failed),
+          sessions,
+          truncatedSessions: r.truncatedSessions,
+          durationMs: performance.now() - start,
+        };
+        return body;
+      });
       return;
     }
 
@@ -379,6 +331,28 @@ export function createRequestHandler(
     const entry = registry.get(id!);
     if (!entry) {
       sendJson(res, 404, { error: `세션을 찾을 수 없습니다: ${id}` });
+      return;
+    }
+
+    // 세션 인덱스 구축이 실패해도 검색은 답한다 — 귀속만 none이 된다 (Spec "귀속")
+    if (rest === "/search") {
+      const q = validQuery(url, res);
+      if (q === null) return;
+      void respondSearch(res, search, async (client) => {
+        const start = performance.now();
+        const r = await client.searchOne(q, entry.filePath);
+        const failed: IndexStatus["failed"][number][] = [];
+        const matches = attribute(entry, r.matches, failed);
+        const body: SessionSearchResponse = {
+          query: q,
+          index: indexStatus(r.index, byPath, failed),
+          matchCount: r.matchCount,
+          matches,
+          truncated: r.matchCount > matches.length,
+          durationMs: performance.now() - start,
+        };
+        return body;
+      });
       return;
     }
 
@@ -406,27 +380,6 @@ export function createRequestHandler(
         return;
       }
       sendJson(res, 200, detail);
-      return;
-    }
-
-    if (rest === "/search") {
-      const q = url.searchParams.get("q");
-      if (!q) {
-        sendJson(res, 400, { error: "검색어가 필요합니다" });
-        return;
-      }
-      const outcome = runSearch(
-        entry.filePath,
-        index,
-        nodes,
-        fresh.state.snapshot,
-        q,
-      );
-      if ("result" in outcome) {
-        sendJson(res, 200, outcome.result);
-      } else {
-        sendJson(res, outcome.status, { error: outcome.error });
-      }
       return;
     }
 
@@ -461,6 +414,95 @@ export function createRequestHandler(
     }
 
     sendJson(res, 404, { error: "찾을 수 없습니다" });
+  };
+}
+
+/** Spec "HTTP 엔드포인트" — 앞뒤 공백을 자르지 않는다. 무효면 400을 보내고 null. */
+function validQuery(url: URL, res: ServerResponse): string | null {
+  const q = url.searchParams.get("q");
+  if (!q) {
+    sendJson(res, 400, { error: "검색어가 필요합니다" });
+    return null;
+  }
+  let codePoints = 0;
+  for (const _ of q) codePoints++;
+  if (codePoints > MAX_QUERY_CODE_POINTS) {
+    sendJson(res, 400, { error: "검색어가 너무 깁니다" });
+    return null;
+  }
+  return q;
+}
+
+/** 색인을 열 수 없으면 503, 그 밖의 실패는 500. 다른 기능에는 영향이 없다 (Spec "기동과 첫 생성"). */
+async function respondSearch(
+  res: ServerResponse,
+  search: SearchIndexClient | null,
+  run: (client: SearchIndexClient) => Promise<unknown>,
+): Promise<void> {
+  if (search === null) {
+    sendJson(res, 503, {
+      error: "검색 색인을 만들 수 없습니다: 검색 색인이 연결되지 않았습니다",
+    });
+    return;
+  }
+  try {
+    sendJson(res, 200, await run(search));
+  } catch (err) {
+    if (err instanceof SearchIndexError && err.code === "unavailable") {
+      sendJson(res, 503, {
+        error: `검색 색인을 만들 수 없습니다: ${err.message}`,
+      });
+    } else {
+      sendJson(res, 500, {
+        error: `검색하지 못했습니다: ${(err as Error).message}`,
+      });
+    }
+  }
+}
+
+/**
+ * 반환할 세션에 대해서만 세션 인덱스를 구해 매치를 조각에 귀속시킨다. 인덱스
+ * 구축이 실패하면 그 세션의 매치는 모두 none이고 사유를 `failed`에 더한다
+ * (Spec "귀속").
+ */
+function attribute(
+  entry: SessionEntry,
+  matches: readonly WorkerMatch[],
+  failed: IndexStatus["failed"][number][],
+): SearchMatch[] {
+  if (matches.length === 0) return [];
+  const fresh = ensureFresh(entry);
+  if ("error" in fresh) {
+    failed.push({ sessionId: entry.id, reason: fresh.error });
+  }
+  return matches.map((m) => ({
+    tier: m.tier,
+    timestamp: m.timestamp,
+    excerpt: m.excerpt,
+    attribution:
+      "error" in fresh
+        ? { kind: "none" }
+        : attributeOne(fresh.state.index, fresh.state.nodes, m.uuid),
+  }));
+}
+
+function indexStatus(
+  progress: IndexProgress,
+  byPath: ReadonlyMap<string, SessionEntry>,
+  attributionFailures: readonly IndexStatus["failed"][number][],
+): IndexStatus {
+  return {
+    ready: progress.ready,
+    indexedSessions: progress.indexedSessions,
+    totalSessions: progress.totalSessions,
+    failed: [
+      ...progress.failed.map((f) => ({
+        sessionId: byPath.get(f.path)!.id,
+        reason: f.reason,
+      })),
+      ...attributionFailures,
+    ],
+    suspect: progress.suspect.map((p) => byPath.get(p)!.id),
   };
 }
 
@@ -525,13 +567,16 @@ export function runServe(
   log: (line: string) => void = (line) => console.log(line),
   logError: (line: string) => void = (line) => console.error(line),
 ): Promise<number> {
-  let values: { port?: string };
+  let values: { port?: string; "cache-dir"?: string };
   let positionals: string[];
   try {
     ({ values, positionals } = parseArgs({
       args: [...argv],
       allowPositionals: true,
-      options: { port: { type: "string" } },
+      options: {
+        port: { type: "string" },
+        "cache-dir": { type: "string" },
+      },
     }));
   } catch (err) {
     logError(`인자 파싱 실패: ${(err as Error).message}`);
@@ -562,7 +607,12 @@ export function runServe(
     return Promise.resolve(2);
   }
 
-  const server = createServer(createRequestHandler(registry));
+  // 색인 생성은 워커가 백그라운드로 한다 — 기동을 기다리게 하지 않는다
+  const search = new SearchIndexClient({
+    cacheDir: values["cache-dir"] ?? defaultCacheDir(),
+    paths: [...registry.values()].map((e) => e.filePath),
+  });
+  const server = createServer(createRequestHandler(registry, search));
 
   return new Promise<number>((resolve) => {
     server.on("error", (err: NodeJS.ErrnoException) => {
@@ -573,7 +623,7 @@ export function runServe(
       } else {
         logError(err.message);
       }
-      resolve(2);
+      void search.close().then(() => resolve(2));
     });
 
     server.listen(port, "127.0.0.1", () => {
@@ -585,7 +635,7 @@ export function runServe(
     });
 
     const shutdown = () => {
-      server.close(() => resolve(0));
+      server.close(() => void search.close().then(() => resolve(0)));
       // 열린 keep-alive 연결이 남아 close 콜백이 지연되는 것을 막는다.
       server.closeAllConnections();
     };
