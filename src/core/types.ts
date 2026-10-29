@@ -429,10 +429,16 @@ export interface IndexStatus {
   readonly suspect: readonly string[];
 }
 
-export interface SearchMatch {
+export interface SearchHit {
   readonly tier: SearchTier;
   readonly timestamp: string | null;
   readonly excerpt: string;
+  /** 매치가 든 레코드의 uuid. 없으면 null — 조각으로 이동할 수 없다 */
+  readonly uuid: string | null;
+}
+
+/** 세션 하나 검색의 매치. 조각 귀속까지 포함한다 */
+export interface SearchMatch extends SearchHit {
   readonly attribution: MatchAttribution;
 }
 
@@ -441,7 +447,8 @@ export interface SessionHits {
   readonly bestTier: SearchTier;
   readonly latestAt: string | null;
   readonly matchCount: number;
-  readonly matches: readonly SearchMatch[];
+  /** 전 세션 검색은 귀속하지 않는다 — 이동할 때 `/attribution`으로 구한다 (Spec "귀속") */
+  readonly matches: readonly SearchHit[];
 }
 
 /** `/api/search` */

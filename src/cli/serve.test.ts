@@ -315,6 +315,7 @@ test("serve: /api/session/:id/search는 등급·시각과 조각 귀속을 돌�
         tier: "conversation",
         timestamp: "2026-01-01T00:00:00.000Z",
         excerpt: "first needle",
+        uuid: U(1),
         attribution: {
           kind: "segment",
           uuid: U(1),
@@ -349,7 +350,7 @@ test("serve: 알 수 없는 세션 id의 검색은 404", async () => {
   });
 });
 
-test("serve: /api/search는 실패 세션을 index.failed에, 귀속 실패는 none으로 알린다", async () => {
+test("serve: /api/search는 귀속하지 않고 uuid를 돌려주며, 실패 세션을 index.failed에 알린다", async () => {
   const good = sessionFile("good.jsonl", convLine(U(1), null, "needle a"));
   // parentUuid 필드가 전혀 없으면 세션 인덱스 구축이 실패한다(ADR-0004)
   const noParent = sessionFile(
@@ -367,25 +368,91 @@ test("serve: /api/search는 실패 세션을 index.failed에, 귀속 실패는 n
     assert.equal(res.status, 200);
     const r = (await res.json()) as SearchResponse;
     assert.deepEqual(
-      r.sessions.map((s) => [
-        s.sessionId,
-        s.matches.map((m) => m.attribution.kind),
-      ]),
+      r.sessions.map((s) => [s.sessionId, s.matches]),
       [
-        [sessionIdOf(noParent), ["none"]],
-        [sessionIdOf(good), ["segment"]],
+        [
+          sessionIdOf(noParent),
+          [
+            {
+              tier: "conversation",
+              timestamp: "2026-01-02T00:00:00.000Z",
+              excerpt: "needle b",
+              uuid: U(2),
+            },
+          ],
+        ],
+        [
+          sessionIdOf(good),
+          [
+            {
+              tier: "conversation",
+              timestamp: "2026-01-01T00:00:00.000Z",
+              excerpt: "needle a",
+              uuid: U(1),
+            },
+          ],
+        ],
       ],
     );
     assert.equal(r.truncatedSessions, false);
     assert.equal(r.index.totalSessions, 3);
+    // 세션 인덱스를 만들지 않으므로 noParent의 인덱스 실패는 여기 나오지 않는다
     assert.deepEqual(
-      r.index.failed.map((f) => f.sessionId).sort(),
-      [sessionIdOf(missing), sessionIdOf(noParent)].sort(),
+      r.index.failed.map((f) => f.sessionId),
+      [sessionIdOf(missing)],
+    );
+
+    // 세션 하나 검색은 귀속하고, 인덱스 구축 실패는 none + index.failed
+    const one = (await (
+      await fetch(
+        `${base}/api/session/${sessionIdOf(noParent)}/search?q=needle`,
+      )
+    ).json()) as SessionSearchResponse;
+    assert.deepEqual(
+      one.matches.map((m) => m.attribution),
+      [{ kind: "none" }],
     );
     assert.match(
-      r.index.failed.find((f) => f.sessionId === sessionIdOf(noParent))!.reason,
+      one.index.failed.find((f) => f.sessionId === sessionIdOf(noParent))!
+        .reason,
       /parentUuid 필드가 전혀 없습니다/,
     );
+  });
+});
+
+test("serve: /api/session/:id/attribution은 uuid 하나가 속한 조각을 돌려준다", async () => {
+  const file = sessionFile(
+    "s.jsonl",
+    convLine(U(1), null, "root") + convLine(U(2), U(9), "orphan child"),
+  );
+  await withSearchServer([file], async (base) => {
+    const id = sessionIdOf(file);
+    const get = async (query: string) => {
+      const res = await fetch(`${base}/api/session/${id}/attribution${query}`);
+      const body: unknown = await res.json();
+      return { status: res.status, body };
+    };
+    assert.deepEqual(await get(`?uuid=${U(1)}`), {
+      status: 200,
+      body: { kind: "segment", uuid: U(1), segmentRootUuid: U(1), lineNo: 1 },
+    });
+    assert.deepEqual((await get(`?uuid=${U(2)}`)).body, {
+      kind: "orphan",
+      uuid: U(2),
+      lineNo: 2,
+    });
+    assert.deepEqual((await get(`?uuid=${U(7)}`)).body, {
+      kind: "unindexed",
+      uuid: U(7),
+    });
+    assert.deepEqual(await get(""), {
+      status: 400,
+      body: { error: "uuid가 필요합니다" },
+    });
+    const unknown = await fetch(
+      `${base}/api/session/deadbeef0000/attribution?uuid=${U(1)}`,
+    );
+    assert.equal(unknown.status, 404);
   });
 });
 

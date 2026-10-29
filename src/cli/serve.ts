@@ -295,23 +295,20 @@ export function createRequestHandler(
     if (url.pathname === "/api/search") {
       const q = validQuery(url, res);
       if (q === null) return;
+      // 귀속하지 않는다 — 세션 인덱스를 만들면 메인 스레드가 멈춘다 (Spec "귀속")
       void respondSearch(res, search, async (client) => {
         const start = performance.now();
         const r = await client.searchAll(q);
-        const failed: IndexStatus["failed"][number][] = [];
-        const sessions = r.sessions.map((hits) => {
-          const entry = byPath.get(hits.path)!;
-          return {
-            sessionId: entry.id,
-            bestTier: hits.bestTier,
-            latestAt: hits.latestAt,
-            matchCount: hits.matchCount,
-            matches: attribute(entry, hits.matches, failed),
-          };
-        });
+        const sessions = r.sessions.map((hits) => ({
+          sessionId: byPath.get(hits.path)!.id,
+          bestTier: hits.bestTier,
+          latestAt: hits.latestAt,
+          matchCount: hits.matchCount,
+          matches: hits.matches,
+        }));
         const body: SearchResponse = {
           query: q,
-          index: indexStatus(r.index, byPath, failed),
+          index: indexStatus(r.index, byPath, []),
           sessions,
           truncatedSessions: r.truncatedSessions,
           durationMs: performance.now() - start,
@@ -356,6 +353,12 @@ export function createRequestHandler(
       return;
     }
 
+    const attributionUuid = url.searchParams.get("uuid");
+    if (rest === "/attribution" && !attributionUuid) {
+      sendJson(res, 400, { error: "uuid가 필요합니다" });
+      return;
+    }
+
     const fresh = ensureFresh(entry);
     if ("error" in fresh) {
       sendJson(res, 500, {
@@ -367,6 +370,12 @@ export function createRequestHandler(
 
     if (rest === "/index") {
       sendJson(res, 200, index);
+      return;
+    }
+
+    // 전 세션 검색 결과에서 매치를 눌렀을 때 그 레코드의 조각을 찾는다 (Spec "귀속")
+    if (rest === "/attribution") {
+      sendJson(res, 200, attributeOne(index, nodes, attributionUuid));
       return;
     }
 
@@ -461,9 +470,8 @@ async function respondSearch(
 }
 
 /**
- * 반환할 세션에 대해서만 세션 인덱스를 구해 매치를 조각에 귀속시킨다. 인덱스
- * 구축이 실패하면 그 세션의 매치는 모두 none이고 사유를 `failed`에 더한다
- * (Spec "귀속").
+ * 세션 하나 검색의 매치를 조각에 귀속시킨다. 인덱스 구축이 실패하면 매치는
+ * 모두 none이고 사유를 `failed`에 더한다 (Spec "귀속").
  */
 function attribute(
   entry: SessionEntry,
@@ -479,6 +487,7 @@ function attribute(
     tier: m.tier,
     timestamp: m.timestamp,
     excerpt: m.excerpt,
+    uuid: m.uuid,
     attribution:
       "error" in fresh
         ? { kind: "none" }

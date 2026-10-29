@@ -15,6 +15,8 @@ import type {
   SegmentDetail,
   NodeBody,
   IndexStatus,
+  MatchAttribution,
+  SearchHit,
   SearchMatch,
   SearchResponse,
   SessionSearchResponse,
@@ -136,16 +138,20 @@ async function main(): Promise<void> {
 interface HashRoute {
   readonly sessionId: string;
   readonly segmentRootUuid: string | null;
+  /** 전 세션 검색 결과에서 누른 레코드. 세션을 연 뒤 조각을 찾는다 (Spec "귀속") */
+  readonly recordUuid: string | null;
 }
 
 function parseHash(): HashRoute | null {
-  const match = /^#session\/([^/]+)(?:\/segment\/([^/]+))?$/.exec(
+  const match = /^#session\/([^/]+)(?:\/(segment|uuid)\/([^/]+))?$/.exec(
     location.hash,
   );
   if (!match) return null;
+  const target = match[3] ? decodeURIComponent(match[3]) : null;
   return {
     sessionId: decodeURIComponent(match[1]!),
-    segmentRootUuid: match[2] ? decodeURIComponent(match[2]) : null,
+    segmentRootUuid: match[2] === "segment" ? target : null,
+    recordUuid: match[2] === "uuid" ? target : null,
   };
 }
 
@@ -159,6 +165,7 @@ async function routeFromHash(
   if (target && route) {
     await openSession(target, sessions);
     if (route.segmentRootUuid) expandSegment(route.segmentRootUuid);
+    if (route.recordUuid) await revealRecord(target.id, route.recordUuid);
   } else {
     renderSessionList(sessions);
   }
@@ -724,7 +731,7 @@ async function runSearch(query: string): Promise<void> {
       if (seq !== searchSeq) return;
       searchResultsEl.innerHTML = "";
       searchResultsEl.append(...indexNotes(result.index));
-      const box = renderMatches(sessionId, result.matches, null);
+      const box = renderMatches(result.matches);
       if (result.matchCount > result.matches.length) {
         box.prepend(countNote(result.matchCount, result.matches.length));
       }
@@ -789,14 +796,45 @@ function renderMultiSessionResults(result: SearchResponse): void {
     );
   }
   for (const hits of result.sessions) {
-    const heading = sessionName(hits.sessionId);
-    const box = renderMatches(hits.sessionId, hits.matches, heading);
+    const box = document.createElement("div");
+    box.className = "search-result";
+    const heading = Object.assign(document.createElement("div"), {
+      className: "search-heading",
+      textContent: sessionName(hits.sessionId),
+    });
     if (hits.matchCount > hits.matches.length) {
-      box
-        .querySelector(".search-heading")!
-        .append(countNote(hits.matchCount, hits.matches.length));
+      heading.append(countNote(hits.matchCount, hits.matches.length));
+    }
+    box.append(heading);
+    // 귀속은 누를 때 한다 — uuid가 있으면 누를 수 있다 (Spec "귀속")
+    for (const hit of hits.matches) {
+      const uuid = hit.uuid;
+      const el = renderMatchLine(hit, uuid !== null);
+      if (uuid !== null) {
+        el.addEventListener("click", () => {
+          location.hash = `#session/${encodeURIComponent(hits.sessionId)}/uuid/${encodeURIComponent(uuid)}`;
+        });
+      }
+      box.append(el);
     }
     searchResultsEl.append(box);
+  }
+}
+
+/** 전 세션 결과에서 누른 레코드의 조각을 찾아 펼친다. 조각에 속하지 않으면 알린다. */
+async function revealRecord(sessionId: string, uuid: string): Promise<void> {
+  try {
+    const attribution = await getJson<MatchAttribution>(
+      `/api/session/${encodeURIComponent(sessionId)}/attribution?uuid=${encodeURIComponent(uuid)}`,
+    );
+    if (currentSessionId !== sessionId) return;
+    if (attribution.kind === "segment") {
+      expandSegment(attribution.segmentRootUuid);
+    } else {
+      showBanner(`이 레코드는 조각에 속하지 않습니다 (${uuid})`);
+    }
+  } catch (err) {
+    showBanner(`조각을 찾지 못했습니다: ${(err as Error).message}`);
   }
 }
 
@@ -806,30 +844,25 @@ function countNote(total: number, shown: number): HTMLElement {
     textContent: ` ${total.toLocaleString()}건 중 ${shown.toLocaleString()}건`,
   });
 }
-
-/** 조각으로 이동할 수 있는 매치와 없는 매치를 나눠 보여준다 (Spec "화면"). */
-function renderMatches(
-  sessionId: string,
-  matches: readonly SearchMatch[],
-  heading: string | null,
-): HTMLElement {
+/**
+ * 세션 하나 결과. 조각으로 이동할 수 있는 매치와 없는 매치를 나눠 보여준다
+ * (Spec "화면"). 이 세션은 이미 열려 있으므로 누르면 그 자리에서 펼친다.
+ */
+function renderMatches(matches: readonly SearchMatch[]): HTMLElement {
   const box = document.createElement("div");
   box.className = "search-result";
-
-  if (heading !== null) {
-    box.append(
-      Object.assign(document.createElement("div"), {
-        className: "search-heading",
-        textContent: heading,
-      }),
-    );
-  }
 
   const clickable = matches.filter((m) => m.attribution.kind === "segment");
   const rest = matches.filter((m) => m.attribution.kind !== "segment");
 
-  for (const match of clickable)
-    box.append(renderMatchLine(sessionId, match, true));
+  for (const match of clickable) {
+    const el = renderMatchLine(match, true);
+    if (match.attribution.kind === "segment") {
+      const rootUuid = match.attribution.segmentRootUuid;
+      el.addEventListener("click", () => expandSegment(rootUuid));
+    }
+    box.append(el);
+  }
 
   if (rest.length > 0) {
     const restBox = document.createElement("div");
@@ -837,13 +870,10 @@ function renderMatches(
     restBox.append(
       Object.assign(document.createElement("div"), {
         className: "muted",
-        // 이 매치를 버리는 것이 이 설계가 막으려는 실패다 (Spec "귀속") —
-        // 조용히 빼지 않고 별도 묶음으로 보여준다.
         textContent: `조각으로 이동할 수 없는 매치 ${rest.length}건 — 인덱스가 배제했거나 구조를 판단하지 못한 레코드입니다`,
       }),
     );
-    for (const match of rest)
-      restBox.append(renderMatchLine(sessionId, match, false));
+    for (const match of rest) restBox.append(renderMatchLine(match, false));
     box.append(restBox);
   }
 
@@ -868,27 +898,12 @@ const TIER_LABEL: Record<SearchMatch["tier"], string> = {
   meta: "기타",
 };
 
-function renderMatchLine(
-  sessionId: string,
-  match: SearchMatch,
-  clickable: boolean,
-): HTMLElement {
+/** 매치 한 줄. 누를 때의 동작은 호출하는 쪽이 붙인다. */
+function renderMatchLine(hit: SearchHit, clickable: boolean): HTMLElement {
   const el = document.createElement(clickable ? "button" : "div");
   el.className = clickable ? "search-match" : "search-match unindexed";
   if (el instanceof HTMLButtonElement) el.type = "button";
-  el.innerHTML = `<span class="search-tier tier-${escapeHtml(match.tier)}">${TIER_LABEL[match.tier]}</span> <span class="search-excerpt">${escapeHtml(match.excerpt)}</span>`;
-
-  if (clickable && match.attribution.kind === "segment") {
-    const rootUuid = match.attribution.segmentRootUuid;
-    el.addEventListener("click", () => {
-      if (currentSessionId === sessionId) {
-        expandSegment(rootUuid);
-        return;
-      }
-      location.hash = `#session/${encodeURIComponent(sessionId)}/segment/${encodeURIComponent(rootUuid)}`;
-    });
-  }
-
+  el.innerHTML = `<span class="search-tier tier-${escapeHtml(hit.tier)}">${TIER_LABEL[hit.tier]}</span> <span class="search-excerpt">${escapeHtml(hit.excerpt)}</span>`;
   return el;
 }
 
