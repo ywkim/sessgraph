@@ -14,9 +14,12 @@ import type {
   Segment,
   SegmentDetail,
   NodeBody,
+  IndexStatus,
+  MatchAttribution,
+  SearchHit,
   SearchMatch,
-  SearchResult,
-  SessionSearchResult,
+  SearchResponse,
+  SessionSearchResponse,
   SessionSummary,
 } from "../core/types.js";
 import { computeBranchLanes } from "../core/segment-branch.js";
@@ -84,8 +87,11 @@ function openBodyDialog(fullText: string): void {
 let currentSessionId: string | null = null;
 let knownSessions: readonly SessionSummary[] = [];
 
-/** 검색어에 큰따옴표·역슬래시·개행이 있으면 저장 형태가 달라 0건이 나올 수 있다 (Spec "화면"). */
-const UNESCAPABLE_CHARS = /["\\\n]/;
+/**
+ * 검색 요청 순번. 마지막 요청이 아닌 응답은 버린다. 세션을 열거나 목록으로
+ * 돌아가면 올려서 진행 중인 응답도 버린다 (Spec "화면").
+ */
+let searchSeq = 0;
 
 searchFormEl.addEventListener("submit", (e) => {
   e.preventDefault();
@@ -132,16 +138,20 @@ async function main(): Promise<void> {
 interface HashRoute {
   readonly sessionId: string;
   readonly segmentRootUuid: string | null;
+  /** 전 세션 검색 결과에서 누른 레코드. 세션을 연 뒤 조각을 찾는다 (Spec "귀속") */
+  readonly recordUuid: string | null;
 }
 
 function parseHash(): HashRoute | null {
-  const match = /^#session\/([^/]+)(?:\/segment\/([^/]+))?$/.exec(
+  const match = /^#session\/([^/]+)(?:\/(segment|uuid)\/([^/]+))?$/.exec(
     location.hash,
   );
   if (!match) return null;
+  const target = match[3] ? decodeURIComponent(match[3]) : null;
   return {
     sessionId: decodeURIComponent(match[1]!),
-    segmentRootUuid: match[2] ? decodeURIComponent(match[2]) : null,
+    segmentRootUuid: match[2] === "segment" ? target : null,
+    recordUuid: match[2] === "uuid" ? target : null,
   };
 }
 
@@ -155,6 +165,7 @@ async function routeFromHash(
   if (target && route) {
     await openSession(target, sessions);
     if (route.segmentRootUuid) expandSegment(route.segmentRootUuid);
+    if (route.recordUuid) await revealRecord(target.id, route.recordUuid);
   } else {
     renderSessionList(sessions);
   }
@@ -164,6 +175,7 @@ async function routeFromHash(
 function renderSessionList(sessions: readonly SessionSummary[]): void {
   currentSessionId = null;
   knownSessions = sessions;
+  discardPendingSearch();
   searchResultsEl.innerHTML = "";
   summaryEl.textContent = `세션 ${sessions.length}개`;
   bannerEl.hidden = true;
@@ -233,6 +245,7 @@ async function openSession(
 ): Promise<void> {
   currentSessionId = session.id;
   knownSessions = sessions;
+  discardPendingSearch();
   searchResultsEl.innerHTML = "";
   bannerEl.hidden = true;
   warningsEl.innerHTML = "";
@@ -697,8 +710,13 @@ function markIfTruncated(bodyEl: HTMLElement): void {
   });
 }
 
+function discardPendingSearch(): void {
+  searchSeq++;
+}
+
 /** 세션이 열려 있으면 그 안에서만, 목록 화면이면 전 세션에서 찾는다. */
 async function runSearch(query: string): Promise<void> {
+  const seq = ++searchSeq;
   if (!query) {
     searchResultsEl.innerHTML = "";
     return;
@@ -706,20 +724,29 @@ async function runSearch(query: string): Promise<void> {
   searchResultsEl.innerHTML = `<p class="muted">찾는 중…</p>`;
   try {
     if (currentSessionId) {
-      const result = await getJson<SearchResult>(
-        `/api/session/${encodeURIComponent(currentSessionId)}/search?q=${encodeURIComponent(query)}`,
+      const sessionId = currentSessionId;
+      const result = await getJson<SessionSearchResponse>(
+        `/api/session/${encodeURIComponent(sessionId)}/search?q=${encodeURIComponent(query)}`,
       );
+      if (seq !== searchSeq) return;
       searchResultsEl.innerHTML = "";
+      searchResultsEl.append(...indexNotes(result.index));
+      const box = renderMatches(result.matches);
+      if (result.matchCount > result.matches.length) {
+        box.prepend(countNote(result.matchCount, result.matches.length));
+      }
       searchResultsEl.append(
-        renderSearchResult(currentSessionId, result, query, null),
+        result.matchCount === 0 ? noMatchesNote(result.index) : box,
       );
     } else {
-      const results = await getJson<SessionSearchResult[]>(
+      const result = await getJson<SearchResponse>(
         `/api/search?q=${encodeURIComponent(query)}`,
       );
-      renderMultiSessionResults(results, query);
+      if (seq !== searchSeq) return;
+      renderMultiSessionResults(result);
     }
   } catch (err) {
+    if (seq !== searchSeq) return;
     searchResultsEl.innerHTML = "";
     searchResultsEl.append(
       errorLine(`검색하지 못했습니다: ${(err as Error).message}`),
@@ -727,70 +754,115 @@ async function runSearch(query: string): Promise<void> {
   }
 }
 
-function renderMultiSessionResults(
-  results: readonly SessionSearchResult[],
-  query: string,
-): void {
-  searchResultsEl.innerHTML = "";
-  let any = false;
-  for (const entry of results) {
-    if (entry.failure !== null) {
-      searchResultsEl.append(errorLine(`세션 검색 실패: ${entry.failure}`));
-      continue;
-    }
-    if (entry.result.matches.length === 0) continue;
-    any = true;
-    const session = knownSessions.find((s) => s.id === entry.sessionId);
-    searchResultsEl.append(
-      renderSearchResult(
-        entry.sessionId,
-        entry.result,
-        query,
-        session?.label ?? entry.sessionId,
-      ),
-    );
-  }
-  if (!any) searchResultsEl.append(noMatchesNote(query));
+function sessionName(sessionId: string): string {
+  const session = knownSessions.find((s) => s.id === sessionId);
+  return session?.title ?? session?.label ?? sessionId;
 }
 
-/** 결과는 세그먼트별로 묶어 보여준다 (Spec "화면"). */
-function renderSearchResult(
-  sessionId: string,
-  result: SearchResult,
-  query: string,
-  label: string | null,
-): HTMLElement {
-  const box = document.createElement("div");
-  box.className = "search-result";
-
-  if (label !== null) {
-    const heading = document.createElement("div");
-    heading.className = "muted";
-    heading.textContent = label;
-    box.append(heading);
-  }
-
-  if (result.matches.length === 0) {
-    box.append(noMatchesNote(query));
-    return box;
-  }
-
-  if (result.truncated) {
-    box.append(
+/** 색인 진행 상태와 실패 세션. 결과가 일부일 수 있음을 결과 위에 알린다 (Spec "기동과 첫 생성"). */
+function indexNotes(index: IndexStatus): HTMLElement[] {
+  const notes: HTMLElement[] = [];
+  if (!index.ready) {
+    notes.push(
       Object.assign(document.createElement("div"), {
         className: "warning",
-        textContent: "매치가 너무 많아 앞의 1,000건만 표시합니다",
+        textContent: `색인 중 (${index.indexedSessions}/${index.totalSessions} 세션) — 결과가 일부일 수 있습니다`,
       }),
     );
   }
+  for (const failure of index.failed) {
+    notes.push(
+      errorLine(
+        `색인하지 못한 세션: ${sessionName(failure.sessionId)} — ${failure.reason}`,
+      ),
+    );
+  }
+  return notes;
+}
 
-  const clickable = result.matches.filter(
-    (m) => m.attribution.kind === "segment",
-  );
-  const rest = result.matches.filter((m) => m.attribution.kind !== "segment");
+function renderMultiSessionResults(result: SearchResponse): void {
+  searchResultsEl.innerHTML = "";
+  searchResultsEl.append(...indexNotes(result.index));
+  if (result.sessions.length === 0) {
+    searchResultsEl.append(noMatchesNote(result.index));
+    return;
+  }
+  if (result.truncatedSessions) {
+    searchResultsEl.append(
+      Object.assign(document.createElement("div"), {
+        className: "warning",
+        textContent: "매치가 있는 세션이 많아 상위 50개만 표시합니다",
+      }),
+    );
+  }
+  for (const hits of result.sessions) {
+    const box = document.createElement("div");
+    box.className = "search-result";
+    const heading = Object.assign(document.createElement("div"), {
+      className: "search-heading",
+      textContent: sessionName(hits.sessionId),
+    });
+    if (hits.matchCount > hits.matches.length) {
+      heading.append(countNote(hits.matchCount, hits.matches.length));
+    }
+    box.append(heading);
+    // 귀속은 누를 때 한다 — uuid가 있으면 누를 수 있다 (Spec "귀속")
+    for (const hit of hits.matches) {
+      const uuid = hit.uuid;
+      const el = renderMatchLine(hit, uuid !== null);
+      if (uuid !== null) {
+        el.addEventListener("click", () => {
+          location.hash = `#session/${encodeURIComponent(hits.sessionId)}/uuid/${encodeURIComponent(uuid)}`;
+        });
+      }
+      box.append(el);
+    }
+    searchResultsEl.append(box);
+  }
+}
 
-  for (const match of clickable)
-    box.append(renderMatchLine(sessionId, match, true));
+/** 전 세션 결과에서 누른 레코드의 조각을 찾아 펼친다. 조각에 속하지 않으면 알린다. */
+async function revealRecord(sessionId: string, uuid: string): Promise<void> {
+  try {
+    const attribution = await getJson<MatchAttribution>(
+      `/api/session/${encodeURIComponent(sessionId)}/attribution?uuid=${encodeURIComponent(uuid)}`,
+    );
+    if (currentSessionId !== sessionId) return;
+    if (attribution.kind === "segment") {
+      expandSegment(attribution.segmentRootUuid);
+    } else {
+      showBanner(`이 레코드는 조각에 속하지 않습니다 (${uuid})`);
+    }
+  } catch (err) {
+    showBanner(`조각을 찾지 못했습니다: ${(err as Error).message}`);
+  }
+}
+
+function countNote(total: number, shown: number): HTMLElement {
+  return Object.assign(document.createElement("span"), {
+    className: "muted search-count",
+    textContent: ` ${total.toLocaleString()}건 중 ${shown.toLocaleString()}건`,
+  });
+}
+/**
+ * 세션 하나 결과. 조각으로 이동할 수 있는 매치와 없는 매치를 나눠 보여준다
+ * (Spec "화면"). 이 세션은 이미 열려 있으므로 누르면 그 자리에서 펼친다.
+ */
+function renderMatches(matches: readonly SearchMatch[]): HTMLElement {
+  const box = document.createElement("div");
+  box.className = "search-result";
+
+  const clickable = matches.filter((m) => m.attribution.kind === "segment");
+  const rest = matches.filter((m) => m.attribution.kind !== "segment");
+
+  for (const match of clickable) {
+    const el = renderMatchLine(match, true);
+    if (match.attribution.kind === "segment") {
+      const rootUuid = match.attribution.segmentRootUuid;
+      el.addEventListener("click", () => expandSegment(rootUuid));
+    }
+    box.append(el);
+  }
 
   if (rest.length > 0) {
     const restBox = document.createElement("div");
@@ -798,52 +870,40 @@ function renderSearchResult(
     restBox.append(
       Object.assign(document.createElement("div"), {
         className: "muted",
-        // "이 매치를 버리는 것이 이 설계가 막으려는 실패다" (Spec "귀속") —
-        // 조용히 빼지 않고 별도 묶음으로 보여준다.
         textContent: `조각으로 이동할 수 없는 매치 ${rest.length}건 — 인덱스가 배제했거나 구조를 판단하지 못한 레코드입니다`,
       }),
     );
-    for (const match of rest)
-      restBox.append(renderMatchLine(sessionId, match, false));
+    for (const match of rest) restBox.append(renderMatchLine(match, false));
     box.append(restBox);
   }
 
   return box;
 }
 
-function noMatchesNote(query: string): HTMLElement {
+/** 확신에 찬 0건이 가장 위험한 답이다 (ADR-0004) — 색인 중이거나 실패 세션이 있으면 덧붙인다. */
+function noMatchesNote(index: IndexStatus): HTMLElement {
   const p = document.createElement("p");
   p.className = "muted";
   p.textContent = "찾지 못했습니다";
-  // 확신에 찬 0건이 가장 위험한 답이다 (ADR-0004, Spec "화면").
-  if (UNESCAPABLE_CHARS.test(query)) {
-    p.textContent +=
-      " — 검색어에 큰따옴표·역슬래시·개행이 있으면 저장 형태가 달라 찾지 못할 수 있습니다";
+  if (!index.ready) p.textContent += " — 아직 색인 중이라 결과가 일부입니다";
+  if (index.failed.length > 0) {
+    p.textContent += ` — 색인하지 못한 세션 ${index.failed.length}개는 찾지 않았습니다`;
   }
   return p;
 }
 
-function renderMatchLine(
-  sessionId: string,
-  match: SearchMatch,
-  clickable: boolean,
-): HTMLElement {
+const TIER_LABEL: Record<SearchMatch["tier"], string> = {
+  conversation: "대화",
+  tool: "도구",
+  meta: "기타",
+};
+
+/** 매치 한 줄. 누를 때의 동작은 호출하는 쪽이 붙인다. */
+function renderMatchLine(hit: SearchHit, clickable: boolean): HTMLElement {
   const el = document.createElement(clickable ? "button" : "div");
   el.className = clickable ? "search-match" : "search-match unindexed";
   if (el instanceof HTMLButtonElement) el.type = "button";
-  el.innerHTML = `<span class="search-excerpt">${escapeHtml(match.excerpt)}</span>`;
-
-  if (clickable && match.attribution.kind === "segment") {
-    const rootUuid = match.attribution.segmentRootUuid;
-    el.addEventListener("click", () => {
-      if (currentSessionId === sessionId) {
-        expandSegment(rootUuid);
-        return;
-      }
-      location.hash = `#session/${encodeURIComponent(sessionId)}/segment/${encodeURIComponent(rootUuid)}`;
-    });
-  }
-
+  el.innerHTML = `<span class="search-tier tier-${escapeHtml(hit.tier)}">${TIER_LABEL[hit.tier]}</span> <span class="search-excerpt">${escapeHtml(hit.excerpt)}</span>`;
   return el;
 }
 

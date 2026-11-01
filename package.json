@@ -6,7 +6,7 @@
   "license": "MIT",
   "type": "module",
   "engines": {
-    "node": ">=22"
+    "node": ">=22.13"
   },
   "bin": {
     "sessgraph": "dist/cli/index.js"
@@ -14,7 +14,7 @@
   "scripts": {
     "build": "tsc && tsc -p tsconfig.web.json && node scripts/copy-web-assets.js",
     "type-check": "tsc --noEmit && tsc -p tsconfig.web.json --noEmit",
-    "test": "npm run build && node --test dist/**/*.test.js",
+    "test": "npm run build && node --test \"dist/**/*.test.js\"",
     "lint": "eslint .",
     "format": "prettier --write \"**/*.{ts,js,json,md}\"",
     "format:check": "prettier --check \"**/*.{ts,js,json,md}\"",

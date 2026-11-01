@@ -23,12 +23,13 @@ import {
   runServe,
   sessionIdOf,
 } from "./serve.js";
+import { SearchIndexClient } from "./search-index/client.js";
 import type {
   IndexResult,
   NodeBody,
-  SearchResult,
+  SearchResponse,
   SegmentDetail,
-  SessionSearchResult,
+  SessionSearchResponse,
   SessionSummary,
 } from "../core/types.js";
 
@@ -243,55 +244,30 @@ test("serve: append만 발생해도 409 없이 200 + 노드 수 증가를 반영
   });
 });
 
-test("serve: /api/session/:id/search는 매치를 노드에 귀속시켜 돌려준다", async () => {
-  await withServer("compact-split", async (base, _file, id) => {
-    const res = await fetch(
-      `${base}/api/session/${id}/search?q=${encodeURIComponent("assistant")}`,
-    );
-    assert.equal(res.status, 200);
-    const result = (await res.json()) as SearchResult;
-    assert.equal(result.query, "assistant");
-    assert.equal(result.truncated, false);
-    assert.equal(result.matches.length, 2); // "assistant" 타입 레코드 2건(U2, U5)
-    for (const match of result.matches) {
-      assert.equal(match.attribution.kind, "segment");
-    }
-  });
-});
+const convLine = (uuid: string, parent: string | null, text: string) =>
+  JSON.stringify({
+    type: "user",
+    uuid,
+    parentUuid: parent,
+    timestamp: "2026-01-01T00:00:00.000Z",
+    message: { content: text },
+  }) + "\n";
 
-test("serve: /api/session/:id/search는 q 누락 시 400", async () => {
-  await withServer("compact-split", async (base, _file, id) => {
-    const res = await fetch(`${base}/api/session/${id}/search`);
-    assert.equal(res.status, 400);
-  });
-});
-
-test("serve: /api/session/:id/search는 매치 0건도 200", async () => {
-  await withServer("compact-split", async (base, _file, id) => {
-    const res = await fetch(
-      `${base}/api/session/${id}/search?q=${encodeURIComponent("존재하지않는문구")}`,
-    );
-    assert.equal(res.status, 200);
-    const result = (await res.json()) as SearchResult;
-    assert.deepEqual(result.matches, []);
-  });
-});
-
-test("serve: 알 수 없는 세션 id의 검색은 404", async () => {
-  await withServer("compact-split", async (base) => {
-    const res = await fetch(`${base}/api/session/deadbeef0000/search?q=x`);
-    assert.equal(res.status, 404);
-  });
-});
-
-test("serve: /api/search는 /api/sessions와 같은 순서로 세션당 한 항목씩 돌려준다", async () => {
-  const dir = mkdtempSync(path.join(tmpdir(), "sessgraph-serve-"));
-  const fileA = path.join(dir, "a.jsonl");
-  const fileB = path.join(dir, "b.jsonl");
-  copyFileSync(path.join(fixturesDir, "compact-split.anon.jsonl"), fileA);
-  copyFileSync(path.join(fixturesDir, "no-parent-field.anon.jsonl"), fileB);
-  const registry = registerSessions([fileA, fileB]);
-  const server = createServer(createRequestHandler(registry));
+/**
+ * 합성 세션들로 검색 색인이 붙은 서버를 띄우고, 백그라운드 색인이 끝날 때까지
+ * 기다린 뒤 `body`를 부른다. 익명화 픽스처에는 본문이 없어 합성 파일을 쓴다.
+ */
+async function withSearchServer(
+  files: readonly string[],
+  body: (base: string) => Promise<void>,
+  cacheDir = path.join(
+    mkdtempSync(path.join(tmpdir(), "sessgraph-cache-")),
+    "c",
+  ),
+): Promise<void> {
+  const registry = registerSessions(files);
+  const search = new SearchIndexClient({ cacheDir, paths: [...files] });
+  const server = createServer(createRequestHandler(registry, search));
   await new Promise<void>((resolve) =>
     server.listen(0, "127.0.0.1", () => resolve()),
   );
@@ -299,23 +275,203 @@ test("serve: /api/search는 /api/sessions와 같은 순서로 세션당 한 항�
   const port = typeof address === "object" && address ? address.port : 0;
   const base = `http://127.0.0.1:${port}`;
   try {
-    const sessions = (await (
-      await fetch(`${base}/api/sessions`)
-    ).json()) as SessionSummary[];
-    const res = await fetch(`${base}/api/search?q=assistant`);
-    assert.equal(res.status, 200);
-    const results = (await res.json()) as SessionSearchResult[];
-    assert.deepEqual(
-      results.map((r) => r.sessionId),
-      sessions.map((s) => s.id),
-    );
-    assert.equal(results[0]!.failure, null);
-    assert.ok(results[0]!.result);
-    assert.equal(results[1]!.result, null);
-    assert.match(results[1]!.failure ?? "", /parentUuid 필드가 전혀 없습니다/);
+    for (let i = 0; i < 200; i++) {
+      const res = await fetch(`${base}/api/search?q=zzzq`);
+      if (res.status !== 200) break;
+      if (((await res.json()) as SearchResponse).index.ready) break;
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    await body(base);
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));
+    await search.close();
   }
+}
+
+function sessionFile(name: string, content: string): string {
+  const dir = mkdtempSync(path.join(tmpdir(), "sessgraph-serve-"));
+  const file = path.join(dir, name);
+  writeFileSync(file, content);
+  return file;
+}
+
+test("serve: /api/session/:id/search는 등급·시각과 조각 귀속을 돌려준다", async () => {
+  const file = sessionFile(
+    "s.jsonl",
+    convLine(U(1), null, "first needle") + convLine(U(2), U(1), "no match"),
+  );
+  await withSearchServer([file], async (base) => {
+    const res = await fetch(
+      `${base}/api/session/${sessionIdOf(file)}/search?q=needle`,
+    );
+    assert.equal(res.status, 200);
+    const r = (await res.json()) as SessionSearchResponse;
+    assert.equal(r.query, "needle");
+    assert.equal(r.matchCount, 1);
+    assert.equal(r.truncated, false);
+    assert.equal(r.index.ready, true);
+    assert.deepEqual(r.matches, [
+      {
+        tier: "conversation",
+        timestamp: "2026-01-01T00:00:00.000Z",
+        excerpt: "first needle",
+        uuid: U(1),
+        attribution: {
+          kind: "segment",
+          uuid: U(1),
+          segmentRootUuid: U(1),
+          lineNo: 1,
+        },
+      },
+    ]);
+  });
+});
+
+test("serve: 검색어가 없거나 1,000 코드 포인트를 넘으면 400", async () => {
+  const file = sessionFile("s.jsonl", convLine(U(1), null, "x"));
+  await withSearchServer([file], async (base) => {
+    const id = sessionIdOf(file);
+    assert.equal((await fetch(`${base}/api/session/${id}/search`)).status, 400);
+    assert.equal((await fetch(`${base}/api/search?q=`)).status, 400);
+    const long = encodeURIComponent("가".repeat(1001));
+    const tooLong = await fetch(`${base}/api/search?q=${long}`);
+    assert.equal(tooLong.status, 400);
+    assert.deepEqual(await tooLong.json(), { error: "검색어가 너무 깁니다" });
+    const ok = encodeURIComponent("가".repeat(1000));
+    assert.equal((await fetch(`${base}/api/search?q=${ok}`)).status, 200);
+  });
+});
+
+test("serve: 알 수 없는 세션 id의 검색은 404", async () => {
+  const file = sessionFile("s.jsonl", convLine(U(1), null, "x"));
+  await withSearchServer([file], async (base) => {
+    const res = await fetch(`${base}/api/session/deadbeef0000/search?q=x`);
+    assert.equal(res.status, 404);
+  });
+});
+
+test("serve: /api/search는 귀속하지 않고 uuid를 돌려주며, 실패 세션을 index.failed에 알린다", async () => {
+  const good = sessionFile("good.jsonl", convLine(U(1), null, "needle a"));
+  // parentUuid 필드가 전혀 없으면 세션 인덱스 구축이 실패한다(ADR-0004)
+  const noParent = sessionFile(
+    "noparent.jsonl",
+    JSON.stringify({
+      type: "user",
+      uuid: U(2),
+      timestamp: "2026-01-02T00:00:00.000Z",
+      message: { content: "needle b" },
+    }) + "\n",
+  );
+  const missing = path.join(path.dirname(good), "missing.jsonl");
+  await withSearchServer([good, noParent, missing], async (base) => {
+    const res = await fetch(`${base}/api/search?q=needle`);
+    assert.equal(res.status, 200);
+    const r = (await res.json()) as SearchResponse;
+    assert.deepEqual(
+      r.sessions.map((s) => [s.sessionId, s.matches]),
+      [
+        [
+          sessionIdOf(noParent),
+          [
+            {
+              tier: "conversation",
+              timestamp: "2026-01-02T00:00:00.000Z",
+              excerpt: "needle b",
+              uuid: U(2),
+            },
+          ],
+        ],
+        [
+          sessionIdOf(good),
+          [
+            {
+              tier: "conversation",
+              timestamp: "2026-01-01T00:00:00.000Z",
+              excerpt: "needle a",
+              uuid: U(1),
+            },
+          ],
+        ],
+      ],
+    );
+    assert.equal(r.truncatedSessions, false);
+    assert.equal(r.index.totalSessions, 3);
+    // 세션 인덱스를 만들지 않으므로 noParent의 인덱스 실패는 여기 나오지 않는다
+    assert.deepEqual(
+      r.index.failed.map((f) => f.sessionId),
+      [sessionIdOf(missing)],
+    );
+
+    // 세션 하나 검색은 귀속하고, 인덱스 구축 실패는 none + index.failed
+    const one = (await (
+      await fetch(
+        `${base}/api/session/${sessionIdOf(noParent)}/search?q=needle`,
+      )
+    ).json()) as SessionSearchResponse;
+    assert.deepEqual(
+      one.matches.map((m) => m.attribution),
+      [{ kind: "none" }],
+    );
+    assert.match(
+      one.index.failed.find((f) => f.sessionId === sessionIdOf(noParent))!
+        .reason,
+      /parentUuid 필드가 전혀 없습니다/,
+    );
+  });
+});
+
+test("serve: /api/session/:id/attribution은 uuid 하나가 속한 조각을 돌려준다", async () => {
+  const file = sessionFile(
+    "s.jsonl",
+    convLine(U(1), null, "root") + convLine(U(2), U(9), "orphan child"),
+  );
+  await withSearchServer([file], async (base) => {
+    const id = sessionIdOf(file);
+    const get = async (query: string) => {
+      const res = await fetch(`${base}/api/session/${id}/attribution${query}`);
+      const body: unknown = await res.json();
+      return { status: res.status, body };
+    };
+    assert.deepEqual(await get(`?uuid=${U(1)}`), {
+      status: 200,
+      body: { kind: "segment", uuid: U(1), segmentRootUuid: U(1), lineNo: 1 },
+    });
+    assert.deepEqual((await get(`?uuid=${U(2)}`)).body, {
+      kind: "orphan",
+      uuid: U(2),
+      lineNo: 2,
+    });
+    assert.deepEqual((await get(`?uuid=${U(7)}`)).body, {
+      kind: "unindexed",
+      uuid: U(7),
+    });
+    assert.deepEqual(await get(""), {
+      status: 400,
+      body: { error: "uuid가 필요합니다" },
+    });
+    const unknown = await fetch(
+      `${base}/api/session/deadbeef0000/attribution?uuid=${U(1)}`,
+    );
+    assert.equal(unknown.status, 404);
+  });
+});
+
+test("serve: 검색 색인이 없으면 검색만 503이고 다른 API는 정상이다", async () => {
+  const file = sessionFile("s.jsonl", convLine(U(1), null, "x"));
+  const blocker = sessionFile("blocker", "");
+  await withSearchServer(
+    [file],
+    async (base) => {
+      const res = await fetch(`${base}/api/search?q=needle`);
+      assert.equal(res.status, 503);
+      assert.match(
+        ((await res.json()) as { error: string }).error,
+        /^검색 색인을 만들 수 없습니다: /,
+      );
+      assert.equal((await fetch(`${base}/api/sessions`)).status, 200);
+    },
+    path.join(blocker, "cache"),
+  );
 });
 
 test("isStale: size·mtime이 같아도 inode가 다르면 stale이다", () => {

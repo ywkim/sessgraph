@@ -593,6 +593,19 @@ button.copy {
   word-break: break-word;
 }
 
+.search-heading {
+  color: var(--muted);
+}
+
+/* 등급 표시 — 대화/도구/기타 (Spec "화면") */
+.search-tier {
+  font-size: var(--font-meta);
+  color: var(--muted);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 0 var(--space-1);
+}
+
 .search-unattributed {
   display: flex;
   flex-direction: column;
