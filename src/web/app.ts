@@ -92,6 +92,13 @@ let knownSessions: readonly SessionSummary[] = [];
  * 돌아가면 올려서 진행 중인 응답도 버린다 (Spec "화면").
  */
 let searchSeq = 0;
+/** 전 세션 결과에서 막 누른 레코드. 그 이동의 귀속 요청에만 검색어·순위를 실어 기록한다 (Spec "검색 기록"). */
+let pendingOpen: {
+  sessionId: string;
+  uuid: string;
+  query: string;
+  rank: number;
+} | null = null;
 
 searchFormEl.addEventListener("submit", (e) => {
   e.preventDefault();
@@ -795,7 +802,8 @@ function renderMultiSessionResults(result: SearchResponse): void {
       }),
     );
   }
-  for (const hits of result.sessions) {
+  for (const [i, hits] of result.sessions.entries()) {
+    const rank = i + 1;
     const box = document.createElement("div");
     box.className = "search-result";
     const heading = Object.assign(document.createElement("div"), {
@@ -812,6 +820,12 @@ function renderMultiSessionResults(result: SearchResponse): void {
       const el = renderMatchLine(hit, uuid !== null);
       if (uuid !== null) {
         el.addEventListener("click", () => {
+          pendingOpen = {
+            sessionId: hits.sessionId,
+            uuid,
+            query: result.query,
+            rank,
+          };
           location.hash = `#session/${encodeURIComponent(hits.sessionId)}/uuid/${encodeURIComponent(uuid)}`;
         });
       }
@@ -823,9 +837,15 @@ function renderMultiSessionResults(result: SearchResponse): void {
 
 /** 전 세션 결과에서 누른 레코드의 조각을 찾아 펼친다. 조각에 속하지 않으면 알린다. */
 async function revealRecord(sessionId: string, uuid: string): Promise<void> {
+  const open = pendingOpen;
+  pendingOpen = null;
+  let from = "";
+  if (open && open.sessionId === sessionId && open.uuid === uuid) {
+    from = `&q=${encodeURIComponent(open.query)}&rank=${open.rank}`;
+  }
   try {
     const attribution = await getJson<MatchAttribution>(
-      `/api/session/${encodeURIComponent(sessionId)}/attribution?uuid=${encodeURIComponent(uuid)}`,
+      `/api/session/${encodeURIComponent(sessionId)}/attribution?uuid=${encodeURIComponent(uuid)}${from}`,
     );
     if (currentSessionId !== sessionId) return;
     if (attribution.kind === "segment") {

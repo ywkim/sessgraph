@@ -24,6 +24,8 @@ import type {
   SessionSummary,
 } from "../core/types.js";
 import { SearchIndexClient, SearchIndexError } from "./search-index/client.js";
+import { FileSearchLog } from "./search-log.js";
+import type { SearchLog } from "./search-log.js";
 import type { IndexProgress, WorkerMatch } from "./search-index/protocol.js";
 
 /** Spec "Interface" — 지정 포트가 사용 중이어도 다른 포트를 고르지 않는다. */
@@ -271,6 +273,7 @@ function ensureFresh(
 export function createRequestHandler(
   registry: Map<string, SessionEntry>,
   search: SearchIndexClient | null = null,
+  searchLog: SearchLog | null = null,
 ): (req: IncomingMessage, res: ServerResponse) => void {
   const byPath = new Map<string, SessionEntry>();
   for (const entry of registry.values()) byPath.set(entry.filePath, entry);
@@ -313,6 +316,15 @@ export function createRequestHandler(
           truncatedSessions: r.truncatedSessions,
           durationMs: performance.now() - start,
         };
+        searchLog?.record({
+          kind: "search",
+          query: q,
+          sessionId: null,
+          results: sessions.map((s) => s.sessionId),
+          matchCount: sessions.reduce((n, s) => n + s.matchCount, 0),
+          indexReady: body.index.ready,
+          durationMs: body.durationMs,
+        });
         return body;
       });
       return;
@@ -348,6 +360,15 @@ export function createRequestHandler(
           truncated: r.matchCount > matches.length,
           durationMs: performance.now() - start,
         };
+        searchLog?.record({
+          kind: "search",
+          query: q,
+          sessionId: entry.id,
+          results: [],
+          matchCount: r.matchCount,
+          indexReady: body.index.ready,
+          durationMs: body.durationMs,
+        });
         return body;
       });
       return;
@@ -375,6 +396,18 @@ export function createRequestHandler(
 
     // 전 세션 검색 결과에서 매치를 눌렀을 때 그 레코드의 조각을 찾는다 (Spec "귀속")
     if (rest === "/attribution") {
+      // 결과에서 눌러 온 요청만 q·rank를 싣는다 — 새로 고침은 기록하지 않는다
+      const fromQuery = url.searchParams.get("q");
+      const rank = Number(url.searchParams.get("rank"));
+      if (fromQuery && Number.isInteger(rank) && rank > 0) {
+        searchLog?.record({
+          kind: "open",
+          query: fromQuery,
+          sessionId: entry.id,
+          rank,
+          uuid: attributionUuid!,
+        });
+      }
       sendJson(res, 200, attributeOne(index, nodes, attributionUuid));
       return;
     }
@@ -616,12 +649,16 @@ export function runServe(
     return Promise.resolve(2);
   }
 
+  const cacheDir = values["cache-dir"] ?? defaultCacheDir();
   // 색인 생성은 워커가 백그라운드로 한다 — 기동을 기다리게 하지 않는다
   const search = new SearchIndexClient({
-    cacheDir: values["cache-dir"] ?? defaultCacheDir(),
+    cacheDir,
     paths: [...registry.values()].map((e) => e.filePath),
   });
-  const server = createServer(createRequestHandler(registry, search));
+  const searchLog = new FileSearchLog(cacheDir, logError);
+  const server = createServer(
+    createRequestHandler(registry, search, searchLog),
+  );
 
   return new Promise<number>((resolve) => {
     server.on("error", (err: NodeJS.ErrnoException) => {
