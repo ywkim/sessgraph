@@ -9,6 +9,7 @@ import {
   mkdtempSync,
   readFileSync,
   renameSync,
+  statSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -24,6 +25,8 @@ import {
   sessionIdOf,
 } from "./serve.js";
 import { SearchIndexClient } from "./search-index/client.js";
+import { FileSearchLog } from "./search-log.js";
+import type { SearchLog, SearchLogEvent } from "./search-log.js";
 import type {
   IndexResult,
   NodeBody,
@@ -264,10 +267,13 @@ async function withSearchServer(
     mkdtempSync(path.join(tmpdir(), "sessgraph-cache-")),
     "c",
   ),
+  searchLog: SearchLog | null = null,
 ): Promise<void> {
   const registry = registerSessions(files);
   const search = new SearchIndexClient({ cacheDir, paths: [...files] });
-  const server = createServer(createRequestHandler(registry, search));
+  const server = createServer(
+    createRequestHandler(registry, search, searchLog),
+  );
   await new Promise<void>((resolve) =>
     server.listen(0, "127.0.0.1", () => resolve()),
   );
@@ -454,6 +460,101 @@ test("serve: /api/session/:id/attribution은 uuid 하나가 속한 조각을 돌
     );
     assert.equal(unknown.status, 404);
   });
+});
+
+test("serve: 검색과 결과에서 누른 귀속 요청을 검색 기록에 남긴다", async () => {
+  const a = sessionFile("a.jsonl", convLine(U(1), null, "needle one"));
+  const b = sessionFile("b.jsonl", convLine(U(2), null, "needle two"));
+  const events: unknown[] = [];
+  const log: SearchLog = { record: (e) => void events.push(e) };
+  await withSearchServer(
+    [a, b],
+    async (base) => {
+      events.length = 0;
+      const all = (await (
+        await fetch(`${base}/api/search?q=needle`)
+      ).json()) as SearchResponse;
+      const idB = sessionIdOf(b);
+      await fetch(`${base}/api/session/${idB}/search?q=two`);
+      await fetch(
+        `${base}/api/session/${idB}/attribution?uuid=${U(2)}&q=needle&rank=2`,
+      );
+      // 결과에서 눌러 온 것이 아닌 귀속 요청(새로 고침)은 남기지 않는다
+      await fetch(`${base}/api/session/${idB}/attribution?uuid=${U(2)}`);
+
+      const strip = ({ durationMs: _, ...rest }: Record<string, unknown>) =>
+        rest;
+      assert.deepEqual(
+        events.map((e) => strip(e as Record<string, unknown>)),
+        [
+          {
+            kind: "search",
+            query: "needle",
+            sessionId: null,
+            results: all.sessions.map((s) => s.sessionId),
+            matchCount: 2,
+            indexReady: true,
+          },
+          {
+            kind: "search",
+            query: "two",
+            sessionId: idB,
+            results: [],
+            matchCount: 1,
+            indexReady: true,
+          },
+          {
+            kind: "open",
+            query: "needle",
+            sessionId: idB,
+            rank: 2,
+            uuid: U(2),
+          },
+        ],
+      );
+    },
+    undefined,
+    log,
+  );
+});
+
+test("FileSearchLog: 소유자만 읽는 JSONL에 한 줄씩 덧붙인다", () => {
+  const dir = path.join(
+    mkdtempSync(path.join(tmpdir(), "sessgraph-log-")),
+    "c",
+  );
+  const log = new FileSearchLog(dir);
+  log.record({
+    kind: "open",
+    query: "q",
+    sessionId: "s",
+    rank: 1,
+    uuid: "u",
+  });
+  log.record({
+    kind: "open",
+    query: "q2",
+    sessionId: "s",
+    rank: 3,
+    uuid: "u",
+  });
+  const lines = readFileSync(log.filePath, "utf8").trimEnd().split("\n");
+  const parsed = lines.map((l) => JSON.parse(l) as SearchLogEvent);
+  assert.deepEqual(
+    parsed.map((e) => e.query),
+    ["q", "q2"],
+  );
+  assert.match(parsed[0]!.at, /^\d{4}-\d{2}-\d{2}T/);
+  assert.equal(statSync(log.filePath).mode & 0o777, 0o600);
+});
+
+test("FileSearchLog: 쓰지 못하면 알리기만 하고 던지지 않는다", () => {
+  const blocker = sessionFile("blocker", "");
+  const errors: string[] = [];
+  const log = new FileSearchLog(path.join(blocker, "c"), (m) => errors.push(m));
+  log.record({ kind: "open", query: "q", sessionId: "s", rank: 1, uuid: "u" });
+  assert.equal(errors.length, 1);
+  assert.match(errors[0]!, /^검색 기록을 남기지 못했습니다: /);
 });
 
 test("serve: 검색 색인이 없으면 검색만 503이고 다른 API는 정상이다", async () => {
