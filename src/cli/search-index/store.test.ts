@@ -81,7 +81,21 @@ describe("SearchStore", () => {
     store.close();
   });
 
-  it("3글자 미만은 LIKE로 찾고 %·_·\\는 글자 그대로다", () => {
+  it("1글자는 LIKE로 찾고 %·_는 글자 그대로다", () => {
+    const store = SearchStore.open(cacheDir());
+    const f = session([
+      user("50% 할인", "2026-01-01T00:00:00Z"),
+      user("500 원", "2026-01-01T00:00:01Z"),
+      user("a_b", "2026-01-01T00:00:02Z"),
+      user("axb", "2026-01-01T00:00:03Z"),
+    ]);
+    store.sync(f);
+    assert.equal(store.searchOne("%", f).matchCount, 1);
+    assert.equal(store.searchOne("_", f).matchCount, 1);
+    store.close();
+  });
+
+  it("2글자는 보조 색인으로 찾고 %·_·공백은 글자 그대로다", () => {
     const store = SearchStore.open(cacheDir());
     const f = session([
       user("50% 할인", "2026-01-01T00:00:00Z"),
@@ -91,8 +105,124 @@ describe("SearchStore", () => {
     ]);
     store.sync(f);
     assert.equal(store.searchOne("0%", f).matchCount, 1);
-    assert.equal(store.searchOne("_", f).matchCount, 1);
+    assert.equal(store.searchOne("_b", f).matchCount, 1);
+    assert.equal(store.searchOne("0 ", f).matchCount, 1);
     assert.equal(store.searchOne("할인", f).matchCount, 1);
+    assert.equal(store.searchOne("인할", f).matchCount, 0);
+    store.close();
+  });
+
+  it("2글자는 비ASCII도 대소문자를 무시한다", () => {
+    const store = SearchStore.open(cacheDir());
+    const f = session([
+      user("ÉCOLE normale", "2026-01-01T00:00:00Z"),
+      user("école", "2026-01-01T00:00:01Z"),
+      user("ecole", "2026-01-01T00:00:02Z"),
+    ]);
+    store.sync(f);
+    assert.equal(store.searchOne("éc", f).matchCount, 2);
+    assert.equal(store.searchOne("ÉC", f).matchCount, 2);
+    assert.equal(store.searchOne("EC", f).matchCount, 1);
+    store.close();
+  });
+
+  it("2글자는 접으면 길이가 바뀌는 글자도 LIKE로 대신해 찾는다", () => {
+    const store = SearchStore.open(cacheDir());
+    const f = session([user("İx 표기", "2026-01-01T00:00:00Z")]);
+    store.sync(f);
+    assert.equal(store.searchOne("İx", f).matchCount, 1);
+    store.close();
+  });
+
+  it("2글자 결과는 LIKE로 센 건수와 같다 (전 세션·한 세션, 이모지 포함)", () => {
+    const cache = cacheDir();
+    const store = SearchStore.open(cache);
+    const bodies = [
+      "에러가 났다 에러",
+      "고아 페이지",
+      "😀😀 emoji pair",
+      "ab ab ba",
+      "a",
+      "",
+      "Tab\tand\nnewline",
+    ];
+    const f = session(
+      bodies.map((b, i) => user(b, `2026-01-01T00:00:0${i}Z`, `u${i}`)),
+    );
+    store.sync(f);
+    const raw = new DatabaseSync(path.join(cache, "search-v1.sqlite"), {
+      readOnly: true,
+    });
+    for (const q of [
+      "에러",
+      "고아",
+      "😀😀",
+      "ab",
+      "ba",
+      "a ",
+      "\t",
+      " e",
+      "zz",
+    ]) {
+      const expected = (
+        raw
+          .prepare(
+            "SELECT count(*) AS c FROM rows WHERE body LIKE ? ESCAPE '\\'",
+          )
+          .get(`%${q}%`) as { c: number }
+      ).c;
+      assert.equal(store.searchOne(q, f).matchCount, expected, q);
+      const all = store.searchAll(q, new Set([f]));
+      assert.equal(
+        all.sessions.reduce((t, x) => t + x.matchCount, 0),
+        expected,
+        q,
+      );
+    }
+    raw.close();
+    store.close();
+  });
+
+  it("본문의 첫 NUL 뒤는 저장하지 않고, 두 검색이 같은 글자를 본다", () => {
+    const store = SearchStore.open(cacheDir());
+    const f = session([
+      user("앞부분 ab\u0000뒷부분 cd", "2026-01-01T00:00:00Z"),
+    ]);
+    store.sync(f);
+    for (const q of ["ab", "앞부", "뒷부", "cd", "뒷부분"]) {
+      assert.equal(
+        store.searchOne(q, f).matchCount,
+        q.startsWith("ab") || q.startsWith("앞") ? 1 : 0,
+        q,
+      );
+    }
+    store.close();
+  });
+
+  it("짝 없는 서로게이트는 U+FFFD로 저장된 글자로 찾는다", () => {
+    const store = SearchStore.open(cacheDir());
+    const f = session([user("x\ud800y z", "2026-01-01T00:00:00Z")]);
+    store.sync(f);
+    assert.equal(store.searchOne("\ufffdy", f).matchCount, 1);
+    assert.equal(store.searchOne("y z", f).matchCount, 1);
+    store.close();
+  });
+
+  it("덧붙인 줄은 보조 색인에도 더하고, 파일이 교체되면 옛 항목을 지운다", () => {
+    const store = SearchStore.open(cacheDir());
+    const f = session([user("가나 다라", "2026-01-01T00:00:00Z")]);
+    store.sync(f);
+    appendFileSync(f, JSON.stringify(user("마바 사아", null)) + "\n");
+    store.sync(f);
+    assert.equal(store.searchOne("가나", f).matchCount, 1);
+    assert.equal(store.searchOne("마바", f).matchCount, 1);
+
+    const replacement = session([user("자차 카타", "2026-01-01T00:00:00Z")]);
+    renameSync(replacement, f);
+    store.sync(f);
+    assert.equal(store.searchOne("가나", f).matchCount, 0);
+    assert.equal(store.searchOne("마바", f).matchCount, 0);
+    assert.equal(store.searchOne("자차", f).matchCount, 1);
     store.close();
   });
 

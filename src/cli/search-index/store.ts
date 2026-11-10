@@ -17,8 +17,9 @@ import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
 import { extractSearchRows, type SearchTier } from "../../core/search-text.js";
+import { bigramQuery, bigramTokens } from "./bigram.js";
 
-const SCHEMA_VERSION = "1";
+const SCHEMA_VERSION = "2";
 const FILE_NAME = "search-v1.sqlite";
 const TIERS: readonly SearchTier[] = ["conversation", "tool", "meta"];
 const READ_CHUNK = 4 * 1024 * 1024;
@@ -126,12 +127,20 @@ export class SearchStore {
       } else if (prev && prev.indexed_offset > 0) {
         // path는 UNINDEXED라 이 DELETE는 테이블 전체를 훑는다(전체 색인에서 실측 327ms).
         // 행은 indexed_offset 이전 바이트에서만 나오므로(Spec "불변식") 0이면 지울 것이 없다
+        const dropBigrams = db.prepare("DELETE FROM bigrams WHERE rowid = ?");
+        const stale = db
+          .prepare("SELECT rowid FROM rows WHERE path = ?")
+          .all(filePath) as { rowid: number }[];
+        for (const { rowid } of stale) dropBigrams.run(rowid);
         db.prepare("DELETE FROM rows WHERE path = ?").run(filePath);
         db.prepare("DELETE FROM per_session_seen WHERE path = ?").run(filePath);
       }
 
       const insertRow = db.prepare(
         "INSERT INTO rows (path, tier, uuid, ts, body) VALUES (?, ?, ?, ?, ?)",
+      );
+      const insertBigrams = db.prepare(
+        "INSERT INTO bigrams (rowid, t) VALUES (?, ?)",
       );
       const markSeen = db.prepare(
         "INSERT OR IGNORE INTO per_session_seen (path, value) VALUES (?, ?)",
@@ -147,13 +156,16 @@ export class SearchStore {
             continue;
           }
           if (row.tier === "conversation") convRows++;
-          insertRow.run(
+          const text = storedText(row.text);
+          const { lastInsertRowid } = insertRow.run(
             filePath,
             TIERS.indexOf(row.tier),
             row.uuid,
             row.timestamp,
-            row.text,
+            text,
           );
+          const tokens = bigramTokens(text);
+          if (tokens !== "") insertBigrams.run(lastInsertRowid, tokens);
         }
       });
 
@@ -243,20 +255,28 @@ export class SearchStore {
 
   /** 매치의 위치 정보만 가져온다 — 본문은 반환할 행만 다시 읽는다 (Design "순위"). */
   #match(query: string, onlyPath: string | null): Hit[] {
-    const pathClause = onlyPath === null ? "" : " AND path = ?";
     const params: string[] = [];
-    let where: string;
+    let from: string;
     if (codePointLength(query) >= 3) {
-      where = "rows MATCH ?";
+      from = "rows WHERE rows MATCH ?";
       params.push(`"${query.replaceAll('"', '""')}"`);
     } else {
-      where = "body LIKE ? ESCAPE '\\'";
-      params.push(`%${query.replace(/[\\%_]/g, (c) => `\\${c}`)}%`);
+      const token = codePointLength(query) === 2 ? bigramQuery(query) : null;
+      if (token !== null) {
+        // 2글자는 보조 색인에서 토큰 하나를 찾고 rowid로 행을 잇는다
+        from =
+          "bigrams JOIN rows ON rows.rowid = bigrams.rowid WHERE bigrams MATCH ?";
+        params.push(token);
+      } else {
+        from = "rows WHERE body LIKE ? ESCAPE '\\'";
+        params.push(`%${query.replace(/[\\%_]/g, (c) => `\\${c}`)}%`);
+      }
     }
     if (onlyPath !== null) params.push(onlyPath);
+    const pathClause = onlyPath === null ? "" : " AND rows.path = ?";
     return this.#db
       .prepare(
-        `SELECT path, tier, ts, rowid FROM rows WHERE ${where}${pathClause}`,
+        `SELECT rows.path AS path, rows.tier AS tier, rows.ts AS ts, rows.rowid AS rowid FROM ${from}${pathClause}`,
       )
       .all(...params) as unknown as Hit[];
   }
@@ -313,6 +333,10 @@ function openValid(file: string): DatabaseSync {
         CREATE VIRTUAL TABLE rows USING fts5(
           path UNINDEXED, tier UNINDEXED, uuid UNINDEXED, ts UNINDEXED, body,
           tokenize = 'trigram'
+        );
+        CREATE VIRTUAL TABLE bigrams USING fts5(
+          t, content = '', contentless_delete = 1, detail = none,
+          tokenize = 'unicode61'
         );
       `);
       db.prepare(
@@ -374,6 +398,19 @@ function forEachCompleteLine(
   } finally {
     closeSync(fd);
   }
+}
+
+/**
+ * `rows.body`가 실제로 저장하는 글자. SQLite는 텍스트를 첫 NUL 앞까지만 저장하고
+ * (바이너리 덤프를 찍은 도구 결과), 짝이 없는 서로게이트는 U+FFFD로 바꿔 저장한다.
+ * 보조 색인이 저장본과 다른 글자를 보면 두 검색의 답이 갈리므로 저장 전에 맞춘다.
+ */
+function storedText(text: string): string {
+  const nul = text.indexOf("\u0000");
+  return (nul === -1 ? text : text.slice(0, nul)).replace(
+    /[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/g,
+    "\ufffd",
+  );
 }
 
 /** 정렬 키 `(tier 오름차순, ts 내림차순)`, ts가 null이면 같은 등급의 맨 뒤. */
