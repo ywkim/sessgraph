@@ -18,6 +18,7 @@ updated: 2026-11-11
 
 ```html
 <dialog id="body-dialog" class="body-dialog">
+  <p class="body-dialog-notice warning" hidden></p>
   <pre class="body-dialog-text"></pre>
   <div class="body-dialog-formatted" hidden></div>
   <button class="body-dialog-mode" hidden></button>
@@ -56,6 +57,9 @@ function isFormattable(node: NodeIndex): boolean;
 // src/web/formatted-text.ts
 /** 서식 기호가 든 글을 DOM 조각으로 만든다. 허용 목록 밖의 요소·속성은 만들지 않는다. 해석에 실패하면 던진다 */
 export function renderFormatted(text: string): DocumentFragment;
+
+/** DOM 없이 허용 목록의 트리를 만드는 순수 함수. `renderFormatted`가 이 트리에서 DOM을 만들고, 허용 목록 테스트는 이 트리를 검사한다 */
+export function formatToTree(text: string): FNode[];
 ```
 
 `.node-body.truncated`의 `click`과 `keydown`(Enter/Space) 이벤트에서 호출한다. 전체 텍스트는 새 API 호출 없이 이미 렌더 시점에 받은 `bodyCache`(기존 `app.ts:555` `bodyCache.get(cacheKey)`)의 값을 그대로 쓴다 — 이 스펙은 새 데이터 소스를 만들지 않는다.
@@ -87,7 +91,7 @@ export function renderFormatted(text: string): DocumentFragment;
 - 두 `.node-body.truncated`를 연달아 빠르게 클릭: 공용 dialog이므로 나중 클릭의 내용으로 교체된다. 동시에 두 개가 열리는 상태는 만들지 않는다(네이티브 `<dialog>`가 `showModal()` 재호출 시 이미 열려있으면 예외를 던지므로, `openBodyDialog`는 호출 전에 `if (dialog.open) dialog.close()`로 정리한다)
 - 텍스트에 HTML 특수문자 포함: `<pre>`에 `textContent`로 대입한다(`innerHTML` 아님) — 이스케이프 없이도 안전하고, 기존 렌더 경로의 `escapeHtml` 관례와 다른 이유로 안전한 것이므로 혼동하지 않는다. 서식 보기의 결과도 위 허용 목록을 지킨다 — 허용 목록 밖의 요소·속성이 나오지 않는다는 것을 테스트로 강제한다(`<script>`, `onerror=`, `javascript:` 링크, `<img>`가 든 입력)
 - `renderFormatted`가 던짐: 원문 보기로 열고 `.body-dialog-text` 위에 "서식을 해석하지 못해 원문으로 보여줍니다"를 보인다. 전환 버튼은 숨긴다
-- 아주 큰 본문: 서식 보기의 렌더 비용은 측정하지 않았다. 본문 길이 상한을 넘으면 원문만 보인다는 규칙을 두되, 상한값은 구현 단계에서 측정해 이 문서에 적는다(현재 미정)
+- 아주 큰 본문: 글이 30만 자(`FORMAT_MAX_CHARS`)를 넘으면 서식 보기를 만들지 않고 원문만 보이며 "본문이 길어 원문으로 보여줍니다"를 알린다. 근거는 헤드리스 Chromium에서 반복한 실측이다: 약 29만 자(요소 5만 6천 개)가 해석·배치·그리기 합쳐 약 230ms, 약 59만 자가 약 440ms. 사용자 기기의 브라우저와 사양에서는 재지 않았다
 - 서식 보기에서 dialog를 연 채 세그먼트가 접힘: 위 규칙대로 닫는다. 닫을 때 서식 보기의 DOM도 비운다
 
 ## 성능 요구사항

@@ -29,6 +29,7 @@
 - 조각을 펼치면 가상 스크롤. 화면에 보이는 것만 DOM에 올린다
 - 시간 순서가 있는 체인이므로 **세로 타임라인 고정 배치**를 쓴다. force-directed 레이아웃은 순서를 뭉개므로 쓰지 않는다
 - 행의 본문(`.node-body`)은 일반 텍스트다. 서식(표·제목·코드 블록)을 행 안에서 렌더하지 않는다 — 행 높이(`ROW_HEIGHT`)가 가상 스크롤 위치 계산의 전제이기 때문이다. 서식이 필요하면 전체 보기 dialog에서만 입힌다 ([Spec](../../docs/spec/20260907-1500-node-body-full-text.spec.md))
+- 서식 보기는 `marked`의 토큰 분해만 쓰고 DOM은 `formatted-text.ts`의 허용 목록으로 직접 만든다. `innerHTML`로 글을 넣지 않는다 ([ADR-0009](../../docs/adr/ADR-0009-markdown-view-marked-lexer.md)). `marked`는 빌드가 `dist/web/vendor/`로 복사하고 `index.html`의 `importmap`이 잇는다
 
 기존 도구들이 대형 세션에서 느린 이유는 파일이 커서가 아니라 전체를 파싱해 문자열로 메모리에 올려 렌더하기 때문이다. 같은 실수를 반복하지 않는다.
 

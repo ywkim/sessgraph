@@ -32,6 +32,7 @@ import {
   sessionSubline,
   matchesQuery,
 } from "./format.js";
+import { renderFormatted } from "./formatted-text.js";
 import {
   describeFilters,
   filterQuery,
@@ -82,14 +83,87 @@ bodyDialogCloseEl.type = "button";
 bodyDialogCloseEl.autofocus = true;
 bodyDialogCloseEl.textContent = "닫기";
 bodyDialogCloseEl.addEventListener("click", () => bodyDialogEl.close());
-bodyDialogEl.append(bodyDialogTextEl, bodyDialogCloseEl);
+const bodyDialogNoticeEl = document.createElement("p");
+bodyDialogNoticeEl.className = "body-dialog-notice warning";
+bodyDialogNoticeEl.hidden = true;
+const bodyDialogFormattedEl = document.createElement("div");
+bodyDialogFormattedEl.className = "body-dialog-formatted";
+bodyDialogFormattedEl.hidden = true;
+const bodyDialogModeEl = document.createElement("button");
+bodyDialogModeEl.className = "body-dialog-mode";
+bodyDialogModeEl.type = "button";
+bodyDialogModeEl.hidden = true;
+bodyDialogEl.append(
+  bodyDialogNoticeEl,
+  bodyDialogTextEl,
+  bodyDialogFormattedEl,
+  bodyDialogModeEl,
+  bodyDialogCloseEl,
+);
 document.body.append(bodyDialogEl);
 
-/** 잘린 본문 미리보기의 전체 텍스트를 공용 dialog에 채우고 연다. */
-function openBodyDialog(fullText: string): void {
+/** 서식 보기가 이 길이(글자 수)를 넘는 글은 원문만 보인다. 상한은 실측으로 정했다 (Spec "엣지 케이스"). */
+const FORMAT_MAX_CHARS = 300_000;
+
+/** 서식 보기의 DOM과 안내를 비운다. */
+function clearFormatted(): void {
+  bodyDialogFormattedEl.replaceChildren();
+  bodyDialogFormattedEl.hidden = true;
+  bodyDialogNoticeEl.hidden = true;
+  bodyDialogModeEl.hidden = true;
+}
+
+function showFormatted(formatted: boolean): void {
+  bodyDialogFormattedEl.hidden = !formatted;
+  bodyDialogTextEl.hidden = formatted;
+  bodyDialogModeEl.textContent = formatted ? "원문 보기" : "서식 보기";
+}
+
+bodyDialogModeEl.addEventListener("click", () =>
+  showFormatted(bodyDialogFormattedEl.hidden),
+);
+// 닫을 때 서식 보기의 DOM도 비운다. 곧바로 다시 열린 경우(close 이벤트는 비동기)는 건드리지 않는다
+bodyDialogEl.addEventListener("close", () => {
+  if (!bodyDialogEl.open) clearFormatted();
+});
+
+/** 대화 글이면 서식 보기 대상이다. 도구 입출력 모양은 원문만 보인다 (Spec "서식 보기"). */
+function isFormattable(node: NodeIndex): boolean {
+  return (
+    (node.type === "user" || node.type === "assistant") &&
+    !node.isToolResultShape
+  );
+}
+
+/**
+ * 잘린 본문 미리보기의 전체 텍스트를 공용 dialog에 채우고 연다. formattable이면
+ * 서식 보기로 열고 원문 보기와 오가는 버튼을 보인다.
+ */
+function openBodyDialog(fullText: string, formattable: boolean): void {
   if (bodyDialogEl.open) bodyDialogEl.close();
+  clearFormatted();
   bodyDialogTextEl.textContent = fullText;
+  showFormatted(false);
+  if (formattable) {
+    if (fullText.length > FORMAT_MAX_CHARS) {
+      showNotice("본문이 길어 원문으로 보여줍니다");
+    } else {
+      try {
+        bodyDialogFormattedEl.replaceChildren(renderFormatted(fullText));
+        bodyDialogModeEl.hidden = false;
+        showFormatted(true);
+      } catch {
+        bodyDialogFormattedEl.replaceChildren();
+        showNotice("서식을 해석하지 못해 원문으로 보여줍니다");
+      }
+    }
+  }
   bodyDialogEl.showModal();
+}
+
+function showNotice(message: string): void {
+  bodyDialogNoticeEl.textContent = message;
+  bodyDialogNoticeEl.hidden = false;
 }
 
 /** 화면에 세션 목록이 떠 있으면 null — 그때 검색은 /api/search로 전 세션을 훑는다. */
@@ -708,7 +782,7 @@ function renderNode(
 
   bodyEl.addEventListener("click", () => {
     if (bodyEl.classList.contains("truncated")) {
-      openBodyDialog(bodyCache.get(cacheKey) || "");
+      openBodyDialog(bodyCache.get(cacheKey) || "", isFormattable(node));
     }
   });
   bodyEl.addEventListener("keydown", (e) => {
@@ -717,7 +791,7 @@ function renderNode(
       (e.key === "Enter" || e.key === " ")
     ) {
       e.preventDefault();
-      openBodyDialog(bodyCache.get(cacheKey) || "");
+      openBodyDialog(bodyCache.get(cacheKey) || "", isFormattable(node));
     }
   });
   const cached = bodyCache.get(cacheKey);
