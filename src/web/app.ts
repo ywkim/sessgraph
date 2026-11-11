@@ -100,6 +100,19 @@ let pendingOpen: {
   rank: number;
 } | null = null;
 
+/**
+ * 검색 결과에서 이동해 온 레코드. 가상 스크롤이 행을 다시 만들어도 강조가
+ * 유지되도록 uuid를 모듈 상태로 두고 행을 만들 때 대조한다 (Spec "조각 안 위치").
+ */
+let revealedUuid: string | null = null;
+
+/** 조각 상세 불러오기. 펼침이 시작한 불러오기가 끝나길 기다려 위치로 이동하는 데 쓴다. */
+interface LoadedSegment {
+  readonly nodes: readonly NodeIndex[];
+  readonly viewport: HTMLElement;
+}
+const segmentLoads = new WeakMap<HTMLElement, Promise<LoadedSegment | null>>();
+
 searchFormEl.addEventListener("submit", (e) => {
   e.preventDefault();
   void runSearch(searchInputEl.value.trim());
@@ -171,7 +184,8 @@ async function routeFromHash(
     : undefined;
   if (target && route) {
     await openSession(target, sessions);
-    if (route.segmentRootUuid) expandSegment(route.segmentRootUuid);
+    if (route.segmentRootUuid)
+      await revealInSegment(route.segmentRootUuid, null);
     if (route.recordUuid) await revealRecord(target.id, route.recordUuid);
   } else {
     renderSessionList(sessions);
@@ -182,6 +196,7 @@ async function routeFromHash(
 function renderSessionList(sessions: readonly SessionSummary[]): void {
   currentSessionId = null;
   knownSessions = sessions;
+  revealedUuid = null;
   discardPendingSearch();
   searchResultsEl.innerHTML = "";
   summaryEl.textContent = `세션 ${sessions.length}개`;
@@ -252,6 +267,7 @@ async function openSession(
 ): Promise<void> {
   currentSessionId = session.id;
   knownSessions = sessions;
+  revealedUuid = null;
   discardPendingSearch();
   searchResultsEl.innerHTML = "";
   bannerEl.hidden = true;
@@ -363,7 +379,7 @@ function renderSegment(sessionId: string, segment: Segment): HTMLElement {
     if (body.hidden && bodyDialogEl.open) bodyDialogEl.close();
     if (!body.hidden && !loaded) {
       loaded = true;
-      void loadDetail(sessionId, segment.rootUuid, body);
+      segmentLoads.set(body, loadDetail(sessionId, segment.rootUuid, body));
     }
   });
 
@@ -374,7 +390,7 @@ async function loadDetail(
   sessionId: string,
   rootUuid: string,
   container: HTMLElement,
-): Promise<void> {
+): Promise<LoadedSegment | null> {
   container.innerHTML = `<p class="muted">불러오는 중…</p>`;
   let detail: SegmentDetail;
   try {
@@ -386,14 +402,16 @@ async function loadDetail(
     container.append(
       errorLine(`조각을 불러오지 못했습니다: ${(err as Error).message}`),
     );
-    return;
+    return null;
   }
 
   container.innerHTML = "";
   if (detail.suggestedReattachCommand) {
     container.append(renderReattach(detail));
   }
-  container.append(renderVirtualList(sessionId, detail.nodes, detail.branches));
+  const viewport = renderVirtualList(sessionId, detail.nodes, detail.branches);
+  container.append(viewport);
+  return { nodes: detail.nodes, viewport };
 }
 
 function renderReattach(
@@ -611,7 +629,7 @@ function renderNode(
   activeLanes: readonly number[],
 ): HTMLElement {
   const el = document.createElement("div");
-  el.className = "node";
+  el.className = node.uuid === revealedUuid ? "node revealed" : "node";
   el.style.top = `${position * ROW_HEIGHT}px`;
   el.style.height = `${ROW_HEIGHT}px`;
   // 폭(px)이 아니라 레인 "개수"만 넘긴다 — 실제 폭은 CSS의
@@ -826,7 +844,13 @@ function renderMultiSessionResults(result: SearchResponse): void {
             query: result.query,
             rank,
           };
-          location.hash = `#session/${encodeURIComponent(hits.sessionId)}/uuid/${encodeURIComponent(uuid)}`;
+          const hash = `#session/${encodeURIComponent(hits.sessionId)}/uuid/${encodeURIComponent(uuid)}`;
+          // 주소가 그대로면 hashchange가 오지 않으므로 이동을 직접 다시 실행한다
+          if (location.hash === hash && currentSessionId === hits.sessionId) {
+            void revealRecord(hits.sessionId, uuid);
+          } else {
+            location.hash = hash;
+          }
         });
       }
       box.append(el);
@@ -849,7 +873,7 @@ async function revealRecord(sessionId: string, uuid: string): Promise<void> {
     );
     if (currentSessionId !== sessionId) return;
     if (attribution.kind === "segment") {
-      expandSegment(attribution.segmentRootUuid);
+      await revealInSegment(attribution.segmentRootUuid, uuid);
     } else {
       showBanner(`이 레코드는 조각에 속하지 않습니다 (${uuid})`);
     }
@@ -879,7 +903,8 @@ function renderMatches(matches: readonly SearchMatch[]): HTMLElement {
     const el = renderMatchLine(match, true);
     if (match.attribution.kind === "segment") {
       const rootUuid = match.attribution.segmentRootUuid;
-      el.addEventListener("click", () => expandSegment(rootUuid));
+      const uuid = match.attribution.uuid;
+      el.addEventListener("click", () => void revealInSegment(rootUuid, uuid));
     }
     box.append(el);
   }
@@ -927,13 +952,59 @@ function renderMatchLine(hit: SearchHit, clickable: boolean): HTMLElement {
   return el;
 }
 
-function expandSegment(rootUuid: string): void {
+/**
+ * 조각을 펼치고(이미 펼쳐져 있으면 그대로 둔다) 그 안의 레코드가 영역 가운데에
+ * 오게 스크롤해 강조한다. uuid가 null이면 조각 머리까지만 간다
+ * (Spec "조각 안 위치").
+ */
+async function revealInSegment(
+  rootUuid: string,
+  uuid: string | null,
+): Promise<void> {
+  const sessionId = currentSessionId;
   const head = timelineEl.querySelector<HTMLButtonElement>(
     `[data-root-uuid="${CSS.escape(rootUuid)}"]`,
   );
-  if (!head) return;
+  if (!head) {
+    showBanner(`조각을 찾지 못했습니다 (${rootUuid})`);
+    return;
+  }
   if (head.getAttribute("aria-expanded") !== "true") head.click();
-  head.scrollIntoView({ block: "center" });
+  const body = head.nextElementSibling as HTMLElement;
+  revealedUuid = uuid;
+  if (uuid === null) {
+    head.scrollIntoView({ block: "center" });
+    return;
+  }
+  const loaded = await segmentLoads.get(body);
+  // 기다리는 사이 세션이 바뀌었거나 다른 매치로 이동했으면 그만둔다
+  if (currentSessionId !== sessionId || revealedUuid !== uuid) return;
+  // 불러오기가 실패했으면 그 오류 표시가 남아 있다
+  if (!loaded) return;
+  const index = loaded.nodes.findIndex((n) => n.uuid === uuid);
+  if (index < 0) {
+    revealedUuid = null;
+    showBanner(`조각 안에서 레코드를 찾지 못했습니다 (${uuid})`);
+    return;
+  }
+  const { viewport } = loaded;
+  viewport.scrollTop = Math.max(
+    0,
+    index * ROW_HEIGHT - viewport.clientHeight / 2,
+  );
+  // scroll 이벤트는 비동기라 강조가 첫 페인트에 반영되도록 직접 그리게 한다
+  viewport.dispatchEvent(new Event("scroll"));
+  applyRevealed();
+  viewport.scrollIntoView({ block: "center" });
+}
+
+/** 이미 그려진 행의 강조를 `revealedUuid`에 맞춘다. 새로 그려지는 행은 renderNode가 맞춘다. */
+function applyRevealed(): void {
+  const rows = Array.from(timelineEl.querySelectorAll<HTMLElement>(".node"));
+  for (const el of rows) {
+    const uuid = el.querySelector(".node-head .uuid")?.textContent;
+    el.classList.toggle("revealed", uuid === revealedUuid);
+  }
 }
 
 function showBanner(message: string): void {

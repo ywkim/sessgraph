@@ -274,6 +274,12 @@ button.copy {
   overflow: hidden;
 }
 
+/* 검색 결과에서 이동해 온 레코드 */
+.node.revealed {
+  background: #fff7d6;
+  box-shadow: inset 3px 0 0 #e0a800;
+}
+
 /* 레인 거터 — git log --graph 컬럼처럼, 이 행 시점에 열려 있는 곁가지들을
    세로선으로 그린다(docs/prd/20260906-1400-segment-branch-view.prd.md
    "레인 기반 표시"). 절대 위치라 .node의 고정 --row-height를 건드리지
