@@ -5,55 +5,58 @@ import {
   describeFilters,
   filterQuery,
   type FilterInput,
+  type Period,
   type Tier,
 } from "./search-filters.js";
 
+const NOW = new Date(2026, 10, 12, 15, 30);
+
 const input = (
   tiers: Tier[] = ["conversation", "tool", "meta"],
-  from = "",
-  to = "",
-): FilterInput => ({ tiers: new Set(tiers), from, to });
+  period: Period = "all",
+): FilterInput => ({ tiers: new Set(tiers), period });
 
 describe("filterQuery", () => {
   it("기본값이면 아무것도 싣지 않는다", () => {
-    assert.equal(filterQuery(input()), "");
+    assert.equal(filterQuery(input(), NOW), "");
     assert.equal(describeFilters(input()), "");
   });
 
-  it("시작일은 그날 0시, 끝일은 다음 날 0시(로컬 시간대)다", () => {
-    const q = new URLSearchParams(
-      filterQuery(input(undefined, "2026-11-01", "2026-11-10")),
+  it("최근 N일은 오늘을 포함한 N일 전 0시(로컬 시간대)부터다", () => {
+    const week = new URLSearchParams(filterQuery(input(undefined, "7d"), NOW));
+    assert.equal(week.get("since"), new Date(2026, 10, 6).toISOString());
+    assert.equal(week.get("until"), null);
+    const month = new URLSearchParams(
+      filterQuery(input(undefined, "30d"), NOW),
     );
-    assert.equal(q.get("since"), new Date(2026, 10, 1).toISOString());
-    assert.equal(q.get("until"), new Date(2026, 10, 11).toISOString());
-    assert.equal(q.get("tiers"), null);
+    assert.equal(month.get("since"), new Date(2026, 9, 14).toISOString());
   });
 
-  it("한쪽만 있어도 된다. 달·해를 넘기는 끝일도 맞다", () => {
-    const only = new URLSearchParams(
-      filterQuery(input(undefined, "", "2026-12-31")),
+  it("달·해를 넘겨도 맞다", () => {
+    const q = new URLSearchParams(
+      filterQuery(input(undefined, "90d"), new Date(2026, 0, 10, 9)),
     );
-    assert.equal(only.get("since"), null);
-    assert.equal(only.get("until"), new Date(2027, 0, 1).toISOString());
+    assert.equal(q.get("since"), new Date(2025, 9, 13).toISOString());
   });
 
   it("종류는 고른 것만 순서대로 싣는다", () => {
-    const q = new URLSearchParams(filterQuery(input(["tool", "conversation"])));
+    const q = new URLSearchParams(
+      filterQuery(input(["tool", "conversation"]), NOW),
+    );
     assert.equal(q.get("tiers"), "conversation,tool");
+    assert.equal(q.get("since"), null);
   });
 });
 
 describe("describeFilters", () => {
   it("기간과 종류를 한 줄로 보여준다", () => {
     assert.equal(
-      describeFilters(
-        input(["conversation", "tool"], "2026-11-01", "2026-11-10"),
-      ),
-      "조건: 기간 2026-11-01~2026-11-10 · 종류 대화, 도구",
+      describeFilters(input(["conversation", "tool"], "30d")),
+      "조건: 기간 최근 30일 · 종류 대화, 도구",
     );
     assert.equal(
-      describeFilters(input(undefined, "2026-11-01")),
-      "조건: 기간 2026-11-01~",
+      describeFilters(input(undefined, "7d")),
+      "조건: 기간 최근 7일",
     );
     assert.equal(describeFilters(input(["meta"])), "조건: 종류 기타");
   });
