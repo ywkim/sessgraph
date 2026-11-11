@@ -16,7 +16,9 @@ import {
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
+import { NO_FILTERS } from "../../core/search-filters.js";
 import { extractSearchRows, type SearchTier } from "../../core/search-text.js";
+import type { SearchFilters } from "../../core/types.js";
 import { bigramQuery, bigramTokens } from "./bigram.js";
 
 const SCHEMA_VERSION = "2";
@@ -213,9 +215,10 @@ export class SearchStore {
   searchAll(
     query: string,
     paths: ReadonlySet<string>,
+    filters: SearchFilters = NO_FILTERS,
   ): { readonly sessions: PathHits[]; readonly truncatedSessions: boolean } {
     const byPath = new Map<string, Hit[]>();
-    for (const hit of this.#match(query, null)) {
+    for (const hit of this.#match(query, null, filters)) {
       if (!paths.has(hit.path)) continue;
       let list = byPath.get(hit.path);
       if (!list) byPath.set(hit.path, (list = []));
@@ -244,8 +247,9 @@ export class SearchStore {
   searchOne(
     query: string,
     filePath: string,
+    filters: SearchFilters = NO_FILTERS,
   ): { readonly matchCount: number; readonly matches: StoredMatch[] } {
-    const hits = this.#match(query, filePath);
+    const hits = this.#match(query, filePath, filters);
     hits.sort(compareHits);
     return {
       matchCount: hits.length,
@@ -254,8 +258,12 @@ export class SearchStore {
   }
 
   /** 매치의 위치 정보만 가져온다 — 본문은 반환할 행만 다시 읽는다 (Design "순위"). */
-  #match(query: string, onlyPath: string | null): Hit[] {
-    const params: string[] = [];
+  #match(
+    query: string,
+    onlyPath: string | null,
+    filters: SearchFilters,
+  ): Hit[] {
+    const params: (string | number)[] = [];
     let from: string;
     if (codePointLength(query) >= 3) {
       from = "rows WHERE rows MATCH ?";
@@ -272,8 +280,25 @@ export class SearchStore {
         params.push(`%${query.replace(/[\\%_]/g, (c) => `\\${c}`)}%`);
       }
     }
-    if (onlyPath !== null) params.push(onlyPath);
-    const pathClause = onlyPath === null ? "" : " AND rows.path = ?";
+    // 세 질의 경로가 같은 조건을 붙인다. ts가 null인 행은 날짜 조건에서 빠진다
+    const clauses: string[] = [];
+    if (filters.since !== null) {
+      clauses.push("rows.ts >= ?");
+      params.push(filters.since);
+    }
+    if (filters.until !== null) {
+      clauses.push("rows.ts < ?");
+      params.push(filters.until);
+    }
+    if (filters.tiers !== null) {
+      clauses.push(`rows.tier IN (${filters.tiers.map(() => "?").join(", ")})`);
+      params.push(...filters.tiers.map((t) => TIERS.indexOf(t)));
+    }
+    if (onlyPath !== null) {
+      clauses.push("rows.path = ?");
+      params.push(onlyPath);
+    }
+    const pathClause = clauses.map((c) => ` AND ${c}`).join("");
     return this.#db
       .prepare(
         `SELECT rows.path AS path, rows.tier AS tier, rows.ts AS ts, rows.rowid AS rowid FROM ${from}${pathClause}`,

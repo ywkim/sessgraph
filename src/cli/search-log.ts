@@ -1,6 +1,8 @@
 import { appendFileSync, chmodSync, mkdirSync } from "node:fs";
 import path from "node:path";
 
+import type { SearchFilters } from "../core/types.js";
+
 /**
  * 검색 기록 — 검색어와 결과에서 누른 세션을 남겨 검색 품질 평가에 쓴다
  * (docs/spec/20261015-1821-search-index.spec.md "검색 기록").
@@ -12,6 +14,8 @@ export type SearchLogEvent =
       readonly kind: "search";
       readonly at: string;
       readonly query: string;
+      /** 검색에 건 조건. 안 건 조건은 null. 이 필드가 없는 줄은 조건 없는 검색이다 */
+      readonly filters: SearchFilters;
       /** 세션 하나 검색이면 그 세션 id, 전 세션 검색이면 null */
       readonly sessionId: string | null;
       /** 전 세션 검색 결과의 세션 id, 순위 순. 세션 하나 검색이면 빈 배열 */
@@ -24,6 +28,8 @@ export type SearchLogEvent =
       readonly kind: "open";
       readonly at: string;
       readonly query: string;
+      /** 그 검색에 걸었던 조건. 순위는 이 조건을 적용한 결과의 순위다 */
+      readonly filters: SearchFilters;
       readonly sessionId: string;
       /** 전 세션 결과에서 그 세션의 순위 (1부터) */
       readonly rank: number;

@@ -3,6 +3,7 @@
  * 메인 스레드는 이 파일과 client.ts만 본다.
  */
 import type { SearchTier } from "../../core/search-text.js";
+import type { SearchFilters } from "../../core/types.js";
 
 export interface WorkerInit {
   readonly cacheDir: string;
@@ -11,12 +12,18 @@ export interface WorkerInit {
 }
 
 export type SearchRequest =
-  | { readonly id: number; readonly kind: "all"; readonly query: string }
+  | {
+      readonly id: number;
+      readonly kind: "all";
+      readonly query: string;
+      readonly filters: SearchFilters;
+    }
   | {
       readonly id: number;
       readonly kind: "one";
       readonly query: string;
       readonly path: string;
+      readonly filters: SearchFilters;
     };
 
 export interface IndexProgress {

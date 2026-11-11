@@ -437,6 +437,19 @@ export interface SearchHit {
   readonly uuid: string | null;
 }
 
+/**
+ * 검색 조건 (docs/spec/20261015-1821-search-index.spec.md "검색 조건").
+ * 값이 null인 조건은 제한하지 않는다.
+ */
+export interface SearchFilters {
+  /** 이 시각 이상(포함). UTC 밀리초 `Z` 문자열 */
+  readonly since: string | null;
+  /** 이 시각 미만(미포함). UTC 밀리초 `Z` 문자열 */
+  readonly until: string | null;
+  /** 이 등급만 */
+  readonly tiers: readonly SearchTier[] | null;
+}
+
 /** 세션 하나 검색의 매치. 조각 귀속까지 포함한다 */
 export interface SearchMatch extends SearchHit {
   readonly attribution: MatchAttribution;

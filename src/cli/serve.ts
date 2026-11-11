@@ -12,12 +12,14 @@ import { readSessionMeta } from "../core/session-meta.js";
 import type { SessionMeta } from "../core/session-meta.js";
 import { buildIndexDetailed } from "../core/build-index.js";
 import { attributeOne } from "../core/search.js";
+import { parseSearchFilters } from "../core/search-filters.js";
 import { buildSegmentDetail, isCollapsedByDefault } from "../core/serve.js";
 import type {
   IndexResult,
   IndexStatus,
   NodeIndex,
   NodeBody,
+  SearchFilters,
   SearchMatch,
   SearchResponse,
   SessionSearchResponse,
@@ -298,10 +300,12 @@ export function createRequestHandler(
     if (url.pathname === "/api/search") {
       const q = validQuery(url, res);
       if (q === null) return;
+      const filters = validFilters(url, res);
+      if (filters === null) return;
       // 귀속하지 않는다 — 세션 인덱스를 만들면 메인 스레드가 멈춘다 (Spec "귀속")
       void respondSearch(res, search, async (client) => {
         const start = performance.now();
-        const r = await client.searchAll(q);
+        const r = await client.searchAll(q, filters);
         const sessions = r.sessions.map((hits) => ({
           sessionId: byPath.get(hits.path)!.id,
           bestTier: hits.bestTier,
@@ -319,6 +323,7 @@ export function createRequestHandler(
         searchLog?.record({
           kind: "search",
           query: q,
+          filters,
           sessionId: null,
           results: sessions.map((s) => s.sessionId),
           matchCount: sessions.reduce((n, s) => n + s.matchCount, 0),
@@ -347,9 +352,11 @@ export function createRequestHandler(
     if (rest === "/search") {
       const q = validQuery(url, res);
       if (q === null) return;
+      const filters = validFilters(url, res);
+      if (filters === null) return;
       void respondSearch(res, search, async (client) => {
         const start = performance.now();
-        const r = await client.searchOne(q, entry.filePath);
+        const r = await client.searchOne(q, entry.filePath, filters);
         const failed: IndexStatus["failed"][number][] = [];
         const matches = attribute(entry, r.matches, failed);
         const body: SessionSearchResponse = {
@@ -363,6 +370,7 @@ export function createRequestHandler(
         searchLog?.record({
           kind: "search",
           query: q,
+          filters,
           sessionId: entry.id,
           results: [],
           matchCount: r.matchCount,
@@ -399,10 +407,13 @@ export function createRequestHandler(
       // 결과에서 눌러 온 요청만 q·rank를 싣는다 — 새로 고침은 기록하지 않는다
       const fromQuery = url.searchParams.get("q");
       const rank = Number(url.searchParams.get("rank"));
-      if (fromQuery && Number.isInteger(rank) && rank > 0) {
+      // 조건이 올바르지 않으면 응답은 그대로 하고 open만 남기지 않는다
+      const parsed = parseSearchFilters(filterParams(url));
+      if (fromQuery && Number.isInteger(rank) && rank > 0 && parsed.ok) {
         searchLog?.record({
           kind: "open",
           query: fromQuery,
+          filters: parsed.filters,
           sessionId: entry.id,
           rank,
           uuid: attributionUuid!,
@@ -473,6 +484,28 @@ function validQuery(url: URL, res: ServerResponse): string | null {
     return null;
   }
   return q;
+}
+
+function filterParams(url: URL): {
+  since: string | null;
+  until: string | null;
+  tiers: string | null;
+} {
+  return {
+    since: url.searchParams.get("since"),
+    until: url.searchParams.get("until"),
+    tiers: url.searchParams.get("tiers"),
+  };
+}
+
+/** Spec "검색 조건" — 무효면 400을 보내고 null. */
+function validFilters(url: URL, res: ServerResponse): SearchFilters | null {
+  const parsed = parseSearchFilters(filterParams(url));
+  if (!parsed.ok) {
+    sendJson(res, 400, { error: parsed.error });
+    return null;
+  }
+  return parsed.filters;
 }
 
 /** 색인을 열 수 없으면 503, 그 밖의 실패는 500. 다른 기능에는 영향이 없다 (Spec "기동과 첫 생성"). */

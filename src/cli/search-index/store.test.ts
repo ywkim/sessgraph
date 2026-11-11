@@ -438,3 +438,57 @@ describe("excerptOf", () => {
     assert.equal(excerptOf(body, "i̇"), "İ".repeat(240) + "…");
   });
 });
+
+describe("검색 조건", () => {
+  const f = () =>
+    session([
+      user("alpha day1", "2026-01-01T00:00:00Z", "d1"),
+      user("alpha day2", "2026-01-02T00:00:00Z", "d2"),
+      user("alpha nodate", null, "d3"),
+      toolUse("alpha tool", "2026-01-02T00:00:00Z"),
+    ]);
+
+  it("기간은 시작 이상·끝 미만이고 시각 없는 행은 날짜 조건에서 빠진다", () => {
+    const store = SearchStore.open(cacheDir());
+    const file = f();
+    store.sync(file);
+    const count = (q: string, since: string | null, until: string | null) =>
+      store.searchOne(q, file, { since, until, tiers: null }).matchCount;
+    // 세 질의 경로(3글자 이상, 2글자, 1글자)가 같은 결과를 낸다
+    for (const q of ["alpha", "al", "a"]) {
+      assert.equal(count(q, null, null), 4, q);
+      assert.equal(count(q, "2026-01-02T00:00:00.000Z", null), 2, q);
+      assert.equal(count(q, null, "2026-01-02T00:00:00.000Z"), 1, q);
+      assert.equal(
+        count(q, "2026-01-01T00:00:00.000Z", "2026-01-02T00:00:00.000Z"),
+        1,
+        q,
+      );
+    }
+    store.close();
+  });
+
+  it("종류 조건과 전 세션 검색의 순위·묶음이 조건에 맞는 행만으로 계산된다", () => {
+    const store = SearchStore.open(cacheDir());
+    const file = f();
+    store.sync(file);
+    for (const q of ["alpha", "al", "a"]) {
+      const tool = { since: null, until: null, tiers: ["tool" as const] };
+      assert.equal(store.searchOne(q, file, tool).matchCount, 1, q);
+      const all = store.searchAll(q, new Set([file]), tool);
+      assert.equal(all.sessions[0]!.bestTier, "tool", q);
+      assert.equal(all.sessions[0]!.matchCount, 1, q);
+      const none = {
+        since: "2027-01-01T00:00:00.000Z",
+        until: null,
+        tiers: null,
+      };
+      assert.equal(
+        store.searchAll(q, new Set([file]), none).sessions.length,
+        0,
+        q,
+      );
+    }
+    store.close();
+  });
+});
