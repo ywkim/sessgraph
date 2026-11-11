@@ -67,6 +67,15 @@ cpSync(coreBuild, path.join(to, "core"), {
   filter: (src) => !src.endsWith(".map") && !src.endsWith(".test.js"),
 });
 
+// 브라우저가 `import "marked"`를 풀 수 있도록 단일 ES 모듈을 dist/web/vendor/로
+// 복사한다. index.html의 importmap이 이 경로로 잇는다
+// (docs/adr/ADR-0009-markdown-view-marked-lexer.md).
+mkdirSync(path.join(to, "vendor"), { recursive: true });
+cpSync(
+  path.join(root, "node_modules", "marked", "lib", "marked.esm.js"),
+  path.join(to, "vendor", "marked.esm.js"),
+);
+
 rmSync(path.join(root, "dist", ".web-build"), {
   recursive: true,
   force: true,
