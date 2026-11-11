@@ -613,7 +613,7 @@ button.copy {
   padding: 0;
 }
 
-.search-date input {
+.search-period select {
   padding: 2px var(--space-2);
   border: 1px solid var(--line);
   border-radius: 6px;

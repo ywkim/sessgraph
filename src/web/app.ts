@@ -36,7 +36,9 @@ import { renderFormatted } from "./formatted-text.js";
 import {
   describeFilters,
   filterQuery,
+  PERIODS,
   type FilterInput,
+  type Period,
   type Tier,
 } from "./search-filters.js";
 
@@ -65,8 +67,12 @@ const searchInputEl = document.getElementById(
 ) as HTMLInputElement;
 const searchResultsEl = document.getElementById("search-results")!;
 const searchFiltersEl = document.getElementById("search-filters")!;
-const searchFromEl = document.getElementById("search-from") as HTMLInputElement;
-const searchToEl = document.getElementById("search-to") as HTMLInputElement;
+const searchPeriodEl = document.getElementById(
+  "search-period",
+) as HTMLSelectElement;
+for (const period of PERIODS) {
+  searchPeriodEl.append(new Option(period.label, period.value));
+}
 
 const bodyCache = new Map<string, string>();
 
@@ -215,7 +221,7 @@ function readFilterInput(): FilterInput {
   )) {
     if (box.checked) tiers.add(box.value as Tier);
   }
-  return { tiers, from: searchFromEl.value, to: searchToEl.value };
+  return { tiers, period: searchPeriodEl.value as Period };
 }
 
 /** 화면에 떠 있는 결과를 만든 검색의 조건. 결과를 눌렀을 때 귀속 요청에 싣는다. */

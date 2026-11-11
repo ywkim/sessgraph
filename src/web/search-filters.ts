@@ -11,35 +11,48 @@ const TIER_NAME: Record<Tier, string> = {
   meta: "기타",
 };
 
+export type Period = "all" | "7d" | "30d" | "90d";
+
+/** 기간 선택지. `days`는 오늘을 포함한 날 수이고 `all`은 제한이 없다. */
+export const PERIODS: readonly {
+  readonly value: Period;
+  readonly label: string;
+  readonly days: number | null;
+}[] = [
+  { value: "all", label: "전체", days: null },
+  { value: "7d", label: "최근 7일", days: 7 },
+  { value: "30d", label: "최근 30일", days: 30 },
+  { value: "90d", label: "최근 90일", days: 90 },
+];
+
 export interface FilterInput {
   readonly tiers: ReadonlySet<Tier>;
-  /** `YYYY-MM-DD`. 비어 있으면 "" */
-  readonly from: string;
-  readonly to: string;
-}
-
-/** 로컬 시간대의 `YYYY-MM-DD` 0시를 UTC ISO 문자열로. 해석하지 못하면 null. */
-function localMidnight(date: string, plusDays: number): string | null {
-  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date);
-  if (!m) return null;
-  const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]) + plusDays);
-  return Number.isNaN(d.getTime()) ? null : d.toISOString();
+  readonly period: Period;
 }
 
 export function allTiers(input: FilterInput): boolean {
   return TIER_ORDER.every((t) => input.tiers.has(t));
 }
 
+/** 기간의 시작 시각(UTC ISO). 로컬 시간대의 오늘 0시에서 days-1일 전. 제한이 없으면 null. */
+function periodSince(period: Period, now: Date): string | null {
+  const days = PERIODS.find((p) => p.value === period)?.days ?? null;
+  if (days === null) return null;
+  return new Date(
+    now.getFullYear(),
+    now.getMonth(),
+    now.getDate() - (days - 1),
+  ).toISOString();
+}
+
 /**
- * 요청에 덧붙일 쿼리 문자열(`&since=…&until=…&tiers=…`). 기본값인 조건은 싣지
- * 않는다. 시작일은 그날 0시, 끝일은 다음 날 0시가 된다.
+ * 요청에 덧붙일 쿼리 문자열(`&since=…&tiers=…`). 기본값인 조건은 싣지 않는다.
+ * `now`는 "오늘"의 기준이다.
  */
-export function filterQuery(input: FilterInput): string {
+export function filterQuery(input: FilterInput, now = new Date()): string {
   const params = new URLSearchParams();
-  const since = localMidnight(input.from, 0);
+  const since = periodSince(input.period, now);
   if (since) params.set("since", since);
-  const until = localMidnight(input.to, 1);
-  if (until) params.set("until", until);
   if (!allTiers(input)) {
     params.set("tiers", TIER_ORDER.filter((t) => input.tiers.has(t)).join(","));
   }
@@ -50,8 +63,9 @@ export function filterQuery(input: FilterInput): string {
 /** 기본값과 다른 조건이 있으면 한 줄로, 없으면 "". */
 export function describeFilters(input: FilterInput): string {
   const parts: string[] = [];
-  if (input.from || input.to) {
-    parts.push(`기간 ${input.from}~${input.to}`);
+  const period = PERIODS.find((p) => p.value === input.period);
+  if (period && period.days !== null) {
+    parts.push(`기간 ${period.label}`);
   }
   if (!allTiers(input)) {
     parts.push(
