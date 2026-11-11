@@ -490,6 +490,7 @@ test("serve: 검색과 결과에서 누른 귀속 요청을 검색 기록에 남
           {
             kind: "search",
             query: "needle",
+            filters: { since: null, until: null, tiers: null },
             sessionId: null,
             results: all.sessions.map((s) => s.sessionId),
             matchCount: 2,
@@ -498,6 +499,7 @@ test("serve: 검색과 결과에서 누른 귀속 요청을 검색 기록에 남
           {
             kind: "search",
             query: "two",
+            filters: { since: null, until: null, tiers: null },
             sessionId: idB,
             results: [],
             matchCount: 1,
@@ -506,10 +508,126 @@ test("serve: 검색과 결과에서 누른 귀속 요청을 검색 기록에 남
           {
             kind: "open",
             query: "needle",
+            filters: { since: null, until: null, tiers: null },
             sessionId: idB,
             rank: 2,
             uuid: U(2),
           },
+        ],
+      );
+    },
+    undefined,
+    log,
+  );
+});
+
+test("serve: 검색 조건은 두 검색 경로에 같이 걸리고 검색 기록에 남는다", async () => {
+  const a = sessionFile("a.jsonl", convLine(U(1), null, "needle one"));
+  const b = sessionFile("b.jsonl", convLine(U(2), null, "needle two"));
+  const events: Record<string, unknown>[] = [];
+  const log: SearchLog = {
+    record: (e) => void events.push({ ...e }),
+  };
+  await withSearchServer(
+    [a, b],
+    async (base) => {
+      const idA = sessionIdOf(a);
+      const count = async (path: string, params: string) => {
+        const res = await fetch(`${base}${path}?q=needle${params}`);
+        const body = (await res.json()) as {
+          matchCount?: number;
+          sessions?: { matchCount: number }[];
+          error?: string;
+        };
+        return {
+          status: res.status,
+          n:
+            body.matchCount ??
+            body.sessions?.reduce((m, s) => m + s.matchCount, 0),
+          error: body.error,
+        };
+      };
+      for (const path of ["/api/search", `/api/session/${idA}/search`]) {
+        const total = path === "/api/search" ? 2 : 1;
+        // 픽스처의 시각은 2026-01-01T00:00:00.000Z, 등급은 대화
+        assert.equal((await count(path, "")).n, total);
+        assert.equal((await count(path, "&tiers=conversation")).n, total);
+        assert.equal((await count(path, "&tiers=tool,meta")).n, 0);
+        assert.equal(
+          (await count(path, "&since=2026-01-01T00:00:00.000Z")).n,
+          total,
+        );
+        assert.equal(
+          (await count(path, "&since=2026-01-01T00:00:00.001Z")).n,
+          0,
+        );
+        assert.equal(
+          (await count(path, "&until=2026-01-01T00:00:00.000Z")).n,
+          0,
+        );
+        assert.equal(
+          (await count(path, "&until=2026-01-01T00:00:00.001Z")).n,
+          total,
+        );
+        assert.deepEqual(await count(path, "&since=nope"), {
+          status: 400,
+          n: undefined,
+          error: "시작 시각 형식이 올바르지 않습니다",
+        });
+        assert.equal(
+          (await count(path, "&until=nope")).error,
+          "끝 시각 형식이 올바르지 않습니다",
+        );
+        assert.equal(
+          (
+            await count(
+              path,
+              "&since=2026-02-01T00:00:00Z&until=2026-01-01T00:00:00Z",
+            )
+          ).error,
+          "기간이 비어 있습니다",
+        );
+        assert.equal(
+          (await count(path, "&tiers=")).error,
+          "종류가 올바르지 않습니다",
+        );
+        assert.equal(
+          (await count(path, "&tiers=foo")).error,
+          "종류가 올바르지 않습니다",
+        );
+      }
+
+      events.length = 0;
+      await fetch(
+        `${base}/api/search?q=needle&since=2025-12-31T15:00:00%2B09:00&tiers=tool,conversation,tool`,
+      );
+      const idB = sessionIdOf(b);
+      const q = "q=needle&rank=1&since=2025-12-31T15:00:00Z&tiers=conversation";
+      await fetch(`${base}/api/session/${idB}/attribution?uuid=${U(2)}&${q}`);
+      // 조건이 올바르지 않으면 응답은 그대로 하고 open만 남기지 않는다
+      const bad = await fetch(
+        `${base}/api/session/${idB}/attribution?uuid=${U(2)}&q=needle&rank=1&tiers=foo`,
+      );
+      assert.equal(bad.status, 200);
+      assert.deepEqual(
+        events.map((e) => [e.kind, e.filters]),
+        [
+          [
+            "search",
+            {
+              since: "2025-12-31T06:00:00.000Z",
+              until: null,
+              tiers: ["conversation", "tool"],
+            },
+          ],
+          [
+            "open",
+            {
+              since: "2025-12-31T15:00:00.000Z",
+              until: null,
+              tiers: ["conversation"],
+            },
+          ],
         ],
       );
     },
@@ -527,6 +645,7 @@ test("FileSearchLog: 소유자만 읽는 JSONL에 한 줄씩 덧붙인다", () =
   log.record({
     kind: "open",
     query: "q",
+    filters: { since: null, until: null, tiers: null },
     sessionId: "s",
     rank: 1,
     uuid: "u",
@@ -534,6 +653,7 @@ test("FileSearchLog: 소유자만 읽는 JSONL에 한 줄씩 덧붙인다", () =
   log.record({
     kind: "open",
     query: "q2",
+    filters: { since: null, until: null, tiers: null },
     sessionId: "s",
     rank: 3,
     uuid: "u",
@@ -552,7 +672,14 @@ test("FileSearchLog: 쓰지 못하면 알리기만 하고 던지지 않는다", 
   const blocker = sessionFile("blocker", "");
   const errors: string[] = [];
   const log = new FileSearchLog(path.join(blocker, "c"), (m) => errors.push(m));
-  log.record({ kind: "open", query: "q", sessionId: "s", rank: 1, uuid: "u" });
+  log.record({
+    kind: "open",
+    query: "q",
+    filters: { since: null, until: null, tiers: null },
+    sessionId: "s",
+    rank: 1,
+    uuid: "u",
+  });
   assert.equal(errors.length, 1);
   assert.match(errors[0]!, /^검색 기록을 남기지 못했습니다: /);
 });

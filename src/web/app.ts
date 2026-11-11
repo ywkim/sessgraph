@@ -32,6 +32,12 @@ import {
   sessionSubline,
   matchesQuery,
 } from "./format.js";
+import {
+  describeFilters,
+  filterQuery,
+  type FilterInput,
+  type Tier,
+} from "./search-filters.js";
 
 // 레인 렌더링 개수 상한 — 실측(scripts/measure-branch-structure.mjs)에서
 // laneDepth<=4가 세션의 68%를 덮는다. 그 이상(p90=10, max=41)은 컬럼을
@@ -57,6 +63,9 @@ const searchInputEl = document.getElementById(
   "search-input",
 ) as HTMLInputElement;
 const searchResultsEl = document.getElementById("search-results")!;
+const searchFiltersEl = document.getElementById("search-filters")!;
+const searchFromEl = document.getElementById("search-from") as HTMLInputElement;
+const searchToEl = document.getElementById("search-to") as HTMLInputElement;
 
 const bodyCache = new Map<string, string>();
 
@@ -98,6 +107,7 @@ let pendingOpen: {
   uuid: string;
   query: string;
   rank: number;
+  filterQuery: string;
 } | null = null;
 
 /**
@@ -117,6 +127,25 @@ searchFormEl.addEventListener("submit", (e) => {
   e.preventDefault();
   void runSearch(searchInputEl.value.trim());
 });
+
+/** 조건을 바꾸면 검색어가 있을 때 다시 찾는다 (Spec "검색 조건 입력"). */
+searchFiltersEl.addEventListener("change", () => {
+  const query = searchInputEl.value.trim();
+  if (query) void runSearch(query);
+});
+
+function readFilterInput(): FilterInput {
+  const tiers = new Set<Tier>();
+  for (const box of Array.from(
+    searchFiltersEl.querySelectorAll<HTMLInputElement>('input[name="tier"]'),
+  )) {
+    if (box.checked) tiers.add(box.value as Tier);
+  }
+  return { tiers, from: searchFromEl.value, to: searchToEl.value };
+}
+
+/** 화면에 떠 있는 결과를 만든 검색의 조건. 결과를 눌렀을 때 귀속 요청에 싣는다. */
+let shownFilterQuery = "";
 
 class HttpError extends Error {
   constructor(
@@ -746,12 +775,19 @@ async function runSearch(query: string): Promise<void> {
     searchResultsEl.innerHTML = "";
     return;
   }
+  const input = readFilterInput();
+  if (input.tiers.size === 0) {
+    searchResultsEl.innerHTML = "";
+    searchResultsEl.append(errorLine("종류를 하나 이상 고르세요"));
+    return;
+  }
+  const conditions = filterQuery(input);
   searchResultsEl.innerHTML = `<p class="muted">찾는 중…</p>`;
   try {
     if (currentSessionId) {
       const sessionId = currentSessionId;
       const result = await getJson<SessionSearchResponse>(
-        `/api/session/${encodeURIComponent(sessionId)}/search?q=${encodeURIComponent(query)}`,
+        `/api/session/${encodeURIComponent(sessionId)}/search?q=${encodeURIComponent(query)}${conditions}`,
       );
       if (seq !== searchSeq) return;
       searchResultsEl.innerHTML = "";
@@ -765,10 +801,20 @@ async function runSearch(query: string): Promise<void> {
       );
     } else {
       const result = await getJson<SearchResponse>(
-        `/api/search?q=${encodeURIComponent(query)}`,
+        `/api/search?q=${encodeURIComponent(query)}${conditions}`,
       );
       if (seq !== searchSeq) return;
       renderMultiSessionResults(result);
+    }
+    shownFilterQuery = conditions;
+    const line = describeFilters(input);
+    if (line) {
+      searchResultsEl.prepend(
+        Object.assign(document.createElement("p"), {
+          className: "muted search-conditions",
+          textContent: line,
+        }),
+      );
     }
   } catch (err) {
     if (seq !== searchSeq) return;
@@ -843,6 +889,7 @@ function renderMultiSessionResults(result: SearchResponse): void {
             uuid,
             query: result.query,
             rank,
+            filterQuery: shownFilterQuery,
           };
           const hash = `#session/${encodeURIComponent(hits.sessionId)}/uuid/${encodeURIComponent(uuid)}`;
           // 주소가 그대로면 hashchange가 오지 않으므로 이동을 직접 다시 실행한다
@@ -865,7 +912,7 @@ async function revealRecord(sessionId: string, uuid: string): Promise<void> {
   pendingOpen = null;
   let from = "";
   if (open && open.sessionId === sessionId && open.uuid === uuid) {
-    from = `&q=${encodeURIComponent(open.query)}&rank=${open.rank}`;
+    from = `&q=${encodeURIComponent(open.query)}&rank=${open.rank}${open.filterQuery}`;
   }
   try {
     const attribution = await getJson<MatchAttribution>(

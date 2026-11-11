@@ -4,6 +4,8 @@
  */
 import { Worker } from "node:worker_threads";
 
+import type { SearchFilters } from "../../core/types.js";
+import { NO_FILTERS } from "../../core/search-filters.js";
 import type {
   SearchReply,
   SearchRequest,
@@ -52,21 +54,29 @@ export class SearchIndexClient {
     );
   }
 
-  searchAll(query: string): Promise<SearchResult & { kind: "all" }> {
-    return this.#send({ id: this.#nextId++, kind: "all", query }) as Promise<
-      SearchResult & { kind: "all" }
-    >;
+  searchAll(
+    query: string,
+    filters: SearchFilters = NO_FILTERS,
+  ): Promise<SearchResult & { kind: "all" }> {
+    return this.#send({
+      id: this.#nextId++,
+      kind: "all",
+      query,
+      filters,
+    }) as Promise<SearchResult & { kind: "all" }>;
   }
 
   searchOne(
     query: string,
     path: string,
+    filters: SearchFilters = NO_FILTERS,
   ): Promise<SearchResult & { kind: "one" }> {
     return this.#send({
       id: this.#nextId++,
       kind: "one",
       query,
       path,
+      filters,
     }) as Promise<SearchResult & { kind: "one" }>;
   }
 

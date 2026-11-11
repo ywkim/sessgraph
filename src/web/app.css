@@ -544,6 +544,40 @@ button.copy {
   font: inherit;
 }
 
+.search-form {
+  flex-wrap: wrap;
+}
+
+.search-filters {
+  flex-basis: 100%;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-4);
+  font-size: 0.9em;
+}
+
+.search-tiers {
+  display: flex;
+  gap: var(--space-3);
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.search-tiers legend {
+  float: left;
+  margin-right: var(--space-2);
+  padding: 0;
+}
+
+.search-date input {
+  padding: 2px var(--space-2);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  font: inherit;
+}
+
 .search-form button {
   padding: var(--space-2) var(--space-4);
   border: 1px solid var(--line);

@@ -101,7 +101,7 @@ function handle(req: SearchRequest): SearchReply {
     const { index, eligible } = progress(store);
     let result: SearchResult;
     if (req.kind === "all") {
-      const r = store.searchAll(req.query, eligible);
+      const r = store.searchAll(req.query, eligible, req.filters);
       result = {
         kind: "all",
         index,
@@ -111,7 +111,7 @@ function handle(req: SearchRequest): SearchReply {
       };
     } else {
       const r = eligible.has(req.path)
-        ? store.searchOne(req.query, req.path)
+        ? store.searchOne(req.query, req.path, req.filters)
         : { matchCount: 0, matches: [] };
       result = {
         kind: "one",
