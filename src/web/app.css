@@ -630,6 +630,17 @@ button.copy {
   cursor: pointer;
 }
 
+.search-excluded button {
+  margin-left: var(--space-2);
+  padding: 2px var(--space-3);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel);
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
 #search-results {
   max-width: var(--content-max);
   margin: 0 auto var(--space-4);

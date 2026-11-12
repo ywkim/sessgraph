@@ -216,7 +216,11 @@ export class SearchStore {
     query: string,
     paths: ReadonlySet<string>,
     filters: SearchFilters = NO_FILTERS,
-  ): { readonly sessions: PathHits[]; readonly truncatedSessions: boolean } {
+  ): {
+    readonly sessions: PathHits[];
+    readonly truncatedSessions: boolean;
+    readonly excludedMatchCount: number;
+  } {
     const byPath = new Map<string, Hit[]>();
     for (const hit of this.#match(query, null, filters)) {
       if (!paths.has(hit.path)) continue;
@@ -240,7 +244,11 @@ export class SearchStore {
       matchCount: g.hits.length,
       matches: this.#materialize(g.hits.slice(0, MATCHES_PER_SESSION), query),
     }));
-    return { sessions, truncatedSessions: groups.length > SESSIONS_LIMIT };
+    return {
+      sessions,
+      truncatedSessions: groups.length > SESSIONS_LIMIT,
+      excludedMatchCount: this.#excludedCount(query, null, filters, paths),
+    };
   }
 
   /** 세션 하나 검색 (Spec "순위와 상한"). */
@@ -248,13 +256,48 @@ export class SearchStore {
     query: string,
     filePath: string,
     filters: SearchFilters = NO_FILTERS,
-  ): { readonly matchCount: number; readonly matches: StoredMatch[] } {
+  ): {
+    readonly matchCount: number;
+    readonly matches: StoredMatch[];
+    readonly excludedMatchCount: number;
+  } {
     const hits = this.#match(query, filePath, filters);
     hits.sort(compareHits);
     return {
       matchCount: hits.length,
+      excludedMatchCount: this.#excludedCount(query, filePath, filters, null),
       matches: this.#materialize(hits.slice(0, SESSION_MATCH_LIMIT), query),
     };
+  }
+
+  /**
+   * 종류 조건 때문에 빠진 매치의 수 (Spec "제외된 종류의 건수"). 종류 조건이
+   * 없거나 모든 종류를 고른 검색은 0이다. `paths`가 있으면 그 경로의 행만 센다.
+   */
+  #excludedCount(
+    query: string,
+    onlyPath: string | null,
+    filters: SearchFilters,
+    paths: ReadonlySet<string> | null,
+  ): number {
+    if (filters.tiers === null) return 0;
+    const excluded = TIERS.filter((t) => !filters.tiers!.includes(t));
+    if (excluded.length === 0) return 0;
+    const { fromWhere, params } = this.#fromWhere(query, onlyPath, {
+      ...filters,
+      tiers: excluded,
+    });
+    // 행 수십만 건을 옮기지 않도록 경로별 개수만 가져온다
+    const rows = this.#db
+      .prepare(
+        `SELECT rows.path AS path, COUNT(*) AS n FROM ${fromWhere} GROUP BY rows.path`,
+      )
+      .all(...params) as unknown as { path: string; n: number }[];
+    let total = 0;
+    for (const row of rows) {
+      if (paths === null || paths.has(row.path)) total += row.n;
+    }
+    return total;
   }
 
   /** 매치의 위치 정보만 가져온다 — 본문은 반환할 행만 다시 읽는다 (Design "순위"). */
@@ -263,6 +306,20 @@ export class SearchStore {
     onlyPath: string | null,
     filters: SearchFilters,
   ): Hit[] {
+    const { fromWhere, params } = this.#fromWhere(query, onlyPath, filters);
+    return this.#db
+      .prepare(
+        `SELECT rows.path AS path, rows.tier AS tier, rows.ts AS ts, rows.rowid AS rowid FROM ${fromWhere}`,
+      )
+      .all(...params) as unknown as Hit[];
+  }
+
+  /** 세 질의 경로(3글자 이상·2글자·1글자)와 검색 조건을 이은 `FROM … WHERE …` 조각. */
+  #fromWhere(
+    query: string,
+    onlyPath: string | null,
+    filters: SearchFilters,
+  ): { fromWhere: string; params: (string | number)[] } {
     const params: (string | number)[] = [];
     let from: string;
     if (codePointLength(query) >= 3) {
@@ -299,11 +356,7 @@ export class SearchStore {
       params.push(onlyPath);
     }
     const pathClause = clauses.map((c) => ` AND ${c}`).join("");
-    return this.#db
-      .prepare(
-        `SELECT rows.path AS path, rows.tier AS tier, rows.ts AS ts, rows.rowid AS rowid FROM ${from}${pathClause}`,
-      )
-      .all(...params) as unknown as Hit[];
+    return { fromWhere: `${from}${pathClause}`, params };
   }
 
   #materialize(hits: readonly Hit[], query: string): StoredMatch[] {
