@@ -11,6 +11,9 @@ const TIER_NAME: Record<Tier, string> = {
   meta: "기타",
 };
 
+/** 처음 화면의 종류. 대화 글을 찾는 일이 가장 많아 도구·기타는 꺼 둔다 (Spec "검색 조건 입력"). */
+export const DEFAULT_TIERS: readonly Tier[] = ["conversation"];
+
 export type Period = "all" | "7d" | "30d" | "90d";
 
 /** 기간 선택지. `days`는 오늘을 포함한 날 수이고 `all`은 제한이 없다. */
@@ -60,6 +63,13 @@ export function filterQuery(input: FilterInput, now = new Date()): string {
   return text ? `&${text}` : "";
 }
 
+function isDefaultTiers(input: FilterInput): boolean {
+  return (
+    input.tiers.size === DEFAULT_TIERS.length &&
+    DEFAULT_TIERS.every((t) => input.tiers.has(t))
+  );
+}
+
 /** 기본값과 다른 조건이 있으면 한 줄로, 없으면 "". */
 export function describeFilters(input: FilterInput): string {
   const parts: string[] = [];
@@ -67,7 +77,7 @@ export function describeFilters(input: FilterInput): string {
   if (period && period.days !== null) {
     parts.push(`기간 ${period.label}`);
   }
-  if (!allTiers(input)) {
+  if (!isDefaultTiers(input)) {
     parts.push(
       `종류 ${TIER_ORDER.filter((t) => input.tiers.has(t))
         .map((t) => TIER_NAME[t])
@@ -75,4 +85,17 @@ export function describeFilters(input: FilterInput): string {
     );
   }
   return parts.length ? `조건: ${parts.join(" · ")}` : "";
+}
+
+/** 체크하지 않은 종류. 없으면 빈 배열. */
+export function excludedTiers(input: FilterInput): Tier[] {
+  return TIER_ORDER.filter((t) => !input.tiers.has(t));
+}
+
+/** 제외된 종류의 매치가 더 있다는 안내 문구. 건수가 0이거나 제외한 종류가 없으면 "". */
+export function describeExcluded(input: FilterInput, count: number): string {
+  const tiers = excludedTiers(input);
+  if (count <= 0 || tiers.length === 0) return "";
+  const names = tiers.map((t) => TIER_NAME[t]).join("·");
+  return `${names}에도 ${count.toLocaleString("ko-KR")}건 더 있습니다`;
 }

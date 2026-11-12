@@ -107,17 +107,19 @@ function handle(req: SearchRequest): SearchReply {
         index,
         sessions: r.sessions,
         truncatedSessions: r.truncatedSessions,
+        excludedMatchCount: r.excludedMatchCount,
         durationMs: performance.now() - start,
       };
     } else {
       const r = eligible.has(req.path)
         ? store.searchOne(req.query, req.path, req.filters)
-        : { matchCount: 0, matches: [] };
+        : { matchCount: 0, matches: [], excludedMatchCount: 0 };
       result = {
         kind: "one",
         index,
         matchCount: r.matchCount,
         matches: r.matches,
+        excludedMatchCount: r.excludedMatchCount,
         durationMs: performance.now() - start,
       };
     }

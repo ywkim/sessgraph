@@ -491,4 +491,41 @@ describe("검색 조건", () => {
     }
     store.close();
   });
+
+  it("종류 조건 때문에 빠진 매치의 수를 세 질의 경로에서 같게 센다", () => {
+    const store = SearchStore.open(cacheDir());
+    const file = f();
+    store.sync(file);
+    const conversation = {
+      since: null,
+      until: null,
+      tiers: ["conversation" as const],
+    };
+    for (const q of ["alpha", "al", "a"]) {
+      const one = store.searchOne(q, file, conversation);
+      assert.equal(one.matchCount, 3, q);
+      assert.equal(one.excludedMatchCount, 1, q);
+      const all = store.searchAll(q, new Set([file]), conversation);
+      assert.equal(all.excludedMatchCount, 1, q);
+      // 종류 조건이 없거나 셋 모두면 빠진 것이 없다
+      const none = { since: null, until: null, tiers: null };
+      assert.equal(store.searchOne(q, file, none).excludedMatchCount, 0, q);
+      const every = {
+        since: null,
+        until: null,
+        tiers: ["conversation" as const, "tool" as const, "meta" as const],
+      };
+      assert.equal(store.searchOne(q, file, every).excludedMatchCount, 0, q);
+      // 기간 조건은 빠진 매치 수에도 걸린다 (도구 매치는 1/2 시각)
+      const later = { ...conversation, since: "2026-01-03T00:00:00.000Z" };
+      assert.equal(store.searchOne(q, file, later).excludedMatchCount, 0, q);
+      // 등록되지 않은 경로의 행은 세지 않는다
+      assert.equal(
+        store.searchAll(q, new Set(), conversation).excludedMatchCount,
+        0,
+        q,
+      );
+    }
+    store.close();
+  });
 });

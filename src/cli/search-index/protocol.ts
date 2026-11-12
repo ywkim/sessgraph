@@ -59,6 +59,8 @@ export type SearchResult =
       readonly index: IndexProgress;
       readonly sessions: readonly WorkerSessionHits[];
       readonly truncatedSessions: boolean;
+      /** 종류 조건 때문에 빠진 매치의 수 */
+      readonly excludedMatchCount: number;
       readonly durationMs: number;
     }
   | {
@@ -66,6 +68,8 @@ export type SearchResult =
       readonly index: IndexProgress;
       readonly matchCount: number;
       readonly matches: readonly WorkerMatch[];
+      /** 종류 조건 때문에 빠진 매치의 수 */
+      readonly excludedMatchCount: number;
       readonly durationMs: number;
     };
 

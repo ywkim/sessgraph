@@ -34,7 +34,9 @@ import {
 } from "./format.js";
 import { renderFormatted } from "./formatted-text.js";
 import {
+  describeExcluded,
   describeFilters,
+  excludedTiers,
   filterQuery,
   PERIODS,
   type FilterInput,
@@ -863,6 +865,7 @@ async function runSearch(query: string): Promise<void> {
   }
   const conditions = filterQuery(input);
   searchResultsEl.innerHTML = `<p class="muted">찾는 중…</p>`;
+  let excludedMatchCount = 0;
   try {
     if (currentSessionId) {
       const sessionId = currentSessionId;
@@ -870,6 +873,7 @@ async function runSearch(query: string): Promise<void> {
         `/api/session/${encodeURIComponent(sessionId)}/search?q=${encodeURIComponent(query)}${conditions}`,
       );
       if (seq !== searchSeq) return;
+      excludedMatchCount = result.excludedMatchCount;
       searchResultsEl.innerHTML = "";
       searchResultsEl.append(...indexNotes(result.index));
       const box = renderMatches(result.matches);
@@ -884,9 +888,14 @@ async function runSearch(query: string): Promise<void> {
         `/api/search?q=${encodeURIComponent(query)}${conditions}`,
       );
       if (seq !== searchSeq) return;
+      excludedMatchCount = result.excludedMatchCount;
       renderMultiSessionResults(result);
     }
     shownFilterQuery = conditions;
+    const excludedText = describeExcluded(input, excludedMatchCount);
+    if (excludedText) {
+      searchResultsEl.prepend(excludedNote(excludedText, input));
+    }
     const line = describeFilters(input);
     if (line) {
       searchResultsEl.prepend(
@@ -903,6 +912,29 @@ async function runSearch(query: string): Promise<void> {
       errorLine(`검색하지 못했습니다: ${(err as Error).message}`),
     );
   }
+}
+
+/** 종류 조건 때문에 빠진 매치가 있다는 안내와, 그 종류를 켜서 다시 찾는 버튼. */
+function excludedNote(text: string, input: FilterInput): HTMLElement {
+  const note = Object.assign(document.createElement("p"), {
+    className: "muted search-excluded",
+  });
+  note.append(`${text} `);
+  const button = Object.assign(document.createElement("button"), {
+    type: "button",
+    textContent: "함께 보기",
+  });
+  button.addEventListener("click", () => {
+    for (const tier of excludedTiers(input)) {
+      const box = searchFiltersEl.querySelector<HTMLInputElement>(
+        `input[name="tier"][value="${tier}"]`,
+      );
+      if (box) box.checked = true;
+    }
+    searchFiltersEl.dispatchEvent(new Event("change"));
+  });
+  note.append(button);
+  return note;
 }
 
 function sessionName(sessionId: string): string {

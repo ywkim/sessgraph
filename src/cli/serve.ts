@@ -318,6 +318,7 @@ export function createRequestHandler(
           index: indexStatus(r.index, byPath, []),
           sessions,
           truncatedSessions: r.truncatedSessions,
+          excludedMatchCount: r.excludedMatchCount,
           durationMs: performance.now() - start,
         };
         searchLog?.record({
@@ -365,6 +366,7 @@ export function createRequestHandler(
           matchCount: r.matchCount,
           matches,
           truncated: r.matchCount > matches.length,
+          excludedMatchCount: r.excludedMatchCount,
           durationMs: performance.now() - start,
         };
         searchLog?.record({
