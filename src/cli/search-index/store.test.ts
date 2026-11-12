@@ -57,16 +57,37 @@ describe("SearchStore", () => {
     store.close();
   });
 
-  it("3글자 이상은 대소문자를 무시하고 구(phrase)로 찾는다", () => {
+  it("큰따옴표로 감싼 검색어는 대소문자를 무시하고 구(phrase)로 찾는다", () => {
     const store = SearchStore.open(cacheDir());
     const f = session([
       user("Secret Manager 설정", "2026-01-01T00:00:00Z"),
       user("manager secret", "2026-01-01T00:00:01Z"),
     ]);
     store.sync(f);
-    const r = store.searchOne("secret manager", f);
+    const r = store.searchOne('"secret manager"', f);
     assert.equal(r.matchCount, 1);
     assert.equal(r.matches[0]!.uuid, "u-Secret Manager 설정");
+    store.close();
+  });
+
+  it("띄어 쓴 낱말은 순서와 거리에 상관없이 모두 든 행을 찾는다", () => {
+    const store = SearchStore.open(cacheDir());
+    const f = session([
+      user("영상통화 대기열을 비웠다", "2026-01-01T00:00:00Z"),
+      user("대기열만 있다", "2026-01-01T00:00:01Z"),
+      user("컨텍스트 압축 시점까지 남긴다", "2026-01-01T00:00:02Z"),
+      user("인증서 갱신은 결제 뒤에 x", "2026-01-01T00:00:03Z"),
+    ]);
+    store.sync(f);
+    // 3글자끼리, 2글자끼리, 섞어서, 1글자까지
+    assert.equal(store.searchOne("대기열 영상통화", f).matchCount, 1);
+    assert.equal(store.searchOne("압축 까지", f).matchCount, 1);
+    assert.equal(store.searchOne("인증서 갱신 결제", f).matchCount, 1);
+    assert.equal(store.searchOne("결제 x 인증서", f).matchCount, 1);
+    assert.equal(store.searchOne("대기열  ", f).matchCount, 2);
+    assert.equal(store.searchOne("대기열 없음", f).matchCount, 0);
+    const all = store.searchAll("압축 까지", new Set([f]));
+    assert.equal(all.sessions[0]!.matchCount, 1);
     store.close();
   });
 
@@ -106,7 +127,7 @@ describe("SearchStore", () => {
     store.sync(f);
     assert.equal(store.searchOne("0%", f).matchCount, 1);
     assert.equal(store.searchOne("_b", f).matchCount, 1);
-    assert.equal(store.searchOne("0 ", f).matchCount, 1);
+    assert.equal(store.searchOne('"0 "', f).matchCount, 1);
     assert.equal(store.searchOne("할인", f).matchCount, 1);
     assert.equal(store.searchOne("인할", f).matchCount, 0);
     store.close();
@@ -171,8 +192,10 @@ describe("SearchStore", () => {
           )
           .get(`%${q}%`) as { c: number }
       ).c;
-      assert.equal(store.searchOne(q, f).matchCount, expected, q);
-      const all = store.searchAll(q, new Set([f]));
+      // 공백이 든 2글자는 따옴표로 감싸야 구(phrase) 하나로 찾는다
+      const asked = /\s/.test(q) ? `"${q}"` : q;
+      assert.equal(store.searchOne(asked, f).matchCount, expected, q);
+      const all = store.searchAll(asked, new Set([f]));
       assert.equal(
         all.sessions.reduce((t, x) => t + x.matchCount, 0),
         expected,
@@ -421,6 +444,14 @@ describe("excerptOf", () => {
     assert.equal(
       excerptOf(body, "needle"),
       "…" + "가".repeat(120) + "Needle" + "나".repeat(120) + "…",
+    );
+  });
+
+  it("낱말이 여럿이면 본문에서 가장 먼저 나오는 낱말이 기준이다", () => {
+    const body = "가".repeat(200) + "beta" + "나".repeat(200) + "alpha";
+    assert.equal(
+      excerptOf(body, "alpha beta"),
+      "…" + "가".repeat(120) + "beta" + "나".repeat(120) + "…",
     );
   });
 

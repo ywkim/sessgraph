@@ -314,29 +314,52 @@ export class SearchStore {
       .all(...params) as unknown as Hit[];
   }
 
-  /** 세 질의 경로(3글자 이상·2글자·1글자)와 검색 조건을 이은 `FROM … WHERE …` 조각. */
+  /**
+   * 검색어의 낱말을 길이별 질의 경로(3글자 이상·2글자·1글자)로 나눠 모두 든 행을
+   * 찾고, 검색 조건을 이은 `FROM … WHERE …` 조각.
+   */
   #fromWhere(
     query: string,
     onlyPath: string | null,
     filters: SearchFilters,
   ): { fromWhere: string; params: (string | number)[] } {
-    const params: (string | number)[] = [];
-    let from: string;
-    if (codePointLength(query) >= 3) {
-      from = "rows WHERE rows MATCH ?";
-      params.push(`"${query.replaceAll('"', '""')}"`);
-    } else {
-      const token = codePointLength(query) === 2 ? bigramQuery(query) : null;
-      if (token !== null) {
-        // 2글자는 보조 색인에서 토큰 하나를 찾고 rowid로 행을 잇는다
-        from =
-          "bigrams JOIN rows ON rows.rowid = bigrams.rowid WHERE bigrams MATCH ?";
-        params.push(token);
-      } else {
-        from = "rows WHERE body LIKE ? ESCAPE '\\'";
-        params.push(`%${query.replace(/[\\%_]/g, (c) => `\\${c}`)}%`);
-      }
+    const trigramPhrases: string[] = [];
+    const bigramTokens: string[] = [];
+    const likes: string[] = [];
+    for (const term of searchTerms(query)) {
+      const len = codePointLength(term);
+      const token = len === 2 ? bigramQuery(term) : null;
+      if (len >= 3) trigramPhrases.push(`"${term.replaceAll('"', '""')}"`);
+      else if (token !== null) bigramTokens.push(token);
+      else likes.push(`%${term.replace(/[\\%_]/g, (c) => `\\${c}`)}%`);
     }
+    // FTS5는 공백으로 이은 구(phrase)와 토큰을 모두 든 행만 돌려준다
+    const params: (string | number)[] = [];
+    const where: string[] = [];
+    let from: string;
+    if (trigramPhrases.length > 0) {
+      from = "rows";
+      where.push("rows MATCH ?");
+      params.push(trigramPhrases.join(" "));
+      if (bigramTokens.length > 0) {
+        where.push(
+          "rows.rowid IN (SELECT rowid FROM bigrams WHERE bigrams MATCH ?)",
+        );
+        params.push(bigramTokens.join(" "));
+      }
+    } else if (bigramTokens.length > 0) {
+      // 2글자는 보조 색인에서 토큰을 찾고 rowid로 행을 잇는다
+      from = "bigrams JOIN rows ON rows.rowid = bigrams.rowid";
+      where.push("bigrams MATCH ?");
+      params.push(bigramTokens.join(" "));
+    } else {
+      from = "rows";
+    }
+    for (const like of likes) {
+      where.push("rows.body LIKE ? ESCAPE '\\'");
+      params.push(like);
+    }
+    from = `${from} WHERE ${where.join(" AND ")}`;
     // 세 질의 경로가 같은 조건을 붙인다. ts가 null인 행은 날짜 조건에서 빠진다
     const clauses: string[] = [];
     if (filters.since !== null) {
@@ -509,17 +532,38 @@ function codePointLength(s: string): number {
   return n;
 }
 
-/** Spec "발췌" — 매치 앞뒤 120 코드 포인트, 잘린 쪽에 `…`. */
+/**
+ * Spec "검색어의 낱말" — 공백으로 나눈 낱말(중복 제거). 검색어 전체가 큰따옴표로
+ * 감싸여 있으면 안쪽을 낱말 하나로 보고, 공백뿐인 검색어는 그대로 낱말 하나다.
+ */
+export function searchTerms(query: string): string[] {
+  if (query.length > 2 && query.startsWith('"') && query.endsWith('"')) {
+    return [query.slice(1, -1)];
+  }
+  const terms = [...new Set(query.split(/\s+/).filter((t) => t !== ""))];
+  return terms.length > 0 ? terms : [query];
+}
+
+/** Spec "발췌" — 본문에서 가장 먼저 나오는 낱말 앞뒤 120 코드 포인트, 잘린 쪽에 `…`. */
 export function excerptOf(body: string, query: string): string {
   const lowered = body.toLowerCase();
   let at = -1;
-  if (lowered.length === body.length) at = lowered.indexOf(query.toLowerCase());
+  let matchLength = 0;
+  if (lowered.length === body.length) {
+    for (const term of searchTerms(query)) {
+      const i = lowered.indexOf(term.toLowerCase());
+      if (i !== -1 && (at === -1 || i < at)) {
+        at = i;
+        matchLength = term.length;
+      }
+    }
+  }
   if (at === -1) {
     const end = advance(body, 0, EXCERPT_RADIUS * 2);
     return body.slice(0, end) + (end < body.length ? "…" : "");
   }
   const start = retreat(body, at, EXCERPT_RADIUS);
-  const matchEnd = at + query.length;
+  const matchEnd = at + matchLength;
   const end = advance(body, matchEnd, EXCERPT_RADIUS);
   return (
     (start > 0 ? "…" : "") +
