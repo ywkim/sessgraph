@@ -30,6 +30,7 @@ import type { SearchLog, SearchLogEvent } from "./search-log.js";
 import type {
   IndexResult,
   NodeBody,
+  RelaxedResponse,
   SearchResponse,
   SegmentDetail,
   SessionSearchResponse,
@@ -345,6 +346,28 @@ test("serve: 검색어가 없거나 1,000 코드 포인트를 넘으면 400", as
     assert.deepEqual(await tooLong.json(), { error: "검색어가 너무 깁니다" });
     const ok = encodeURIComponent("가".repeat(1000));
     assert.equal((await fetch(`${base}/api/search?q=${ok}`)).status, 200);
+  });
+});
+
+test("serve: /api/search/relaxed는 낱말 하나를 뺀 검색의 세션 수를 돌려주고 검색어를 검증한다", async () => {
+  const a = sessionFile("a.jsonl", convLine(U(1), null, "renew certificate"));
+  const b = sessionFile("b.jsonl", convLine(U(2), null, "renew payment"));
+  await withSearchServer([a, b], async (base) => {
+    const res = await fetch(
+      `${base}/api/search/relaxed?q=${encodeURIComponent("renew certificate payment")}`,
+    );
+    assert.equal(res.status, 200);
+    const body = (await res.json()) as RelaxedResponse;
+    assert.equal(body.query, "renew certificate payment");
+    assert.deepEqual(body.relaxed, [
+      { term: "certificate", query: "renew payment", sessionCount: 1 },
+      { term: "payment", query: "renew certificate", sessionCount: 1 },
+    ]);
+    assert.equal((await fetch(`${base}/api/search/relaxed?q=`)).status, 400);
+    assert.equal(
+      (await fetch(`${base}/api/search/relaxed?q=renew&tiers=bad`)).status,
+      400,
+    );
   });
 });
 

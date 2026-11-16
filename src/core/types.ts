@@ -464,6 +464,21 @@ export interface SessionHits {
   readonly matches: readonly SearchHit[];
 }
 
+/** 0건인 검색에서 낱말 하나(`term`)를 빼면(`query`) 걸리는 세션의 수 */
+export interface RelaxedSearch {
+  readonly term: string;
+  readonly query: string;
+  readonly sessionCount: number;
+}
+
+/** `/api/search/relaxed` */
+export interface RelaxedResponse {
+  readonly query: string;
+  /** 낱말 하나를 뺀 검색이 걸리는 세션 수(많은 순). 낱말이 2~6개가 아니거나 걸리는 것이 없으면 빈 배열 */
+  readonly relaxed: readonly RelaxedSearch[];
+  readonly durationMs: number;
+}
+
 /** `/api/search` */
 export interface SearchResponse {
   readonly query: string;

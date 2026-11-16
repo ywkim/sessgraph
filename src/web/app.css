@@ -630,7 +630,8 @@ button.copy {
   cursor: pointer;
 }
 
-.search-excluded button {
+.search-excluded button,
+.search-relaxed button {
   margin-left: var(--space-2);
   padding: 2px var(--space-3);
   border: 1px solid var(--line);

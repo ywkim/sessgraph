@@ -3,7 +3,7 @@
  * 메인 스레드는 이 파일과 client.ts만 본다.
  */
 import type { SearchTier } from "../../core/search-text.js";
-import type { SearchFilters } from "../../core/types.js";
+import type { RelaxedSearch, SearchFilters } from "../../core/types.js";
 
 export interface WorkerInit {
   readonly cacheDir: string;
@@ -23,6 +23,12 @@ export type SearchRequest =
       readonly kind: "one";
       readonly query: string;
       readonly path: string;
+      readonly filters: SearchFilters;
+    }
+  | {
+      readonly id: number;
+      readonly kind: "relaxed";
+      readonly query: string;
       readonly filters: SearchFilters;
     };
 
@@ -54,6 +60,7 @@ export interface WorkerSessionHits {
 }
 
 export type SearchResult =
+  | RelaxedResult
   | {
       readonly kind: "all";
       readonly index: IndexProgress;
@@ -72,6 +79,12 @@ export type SearchResult =
       readonly excludedMatchCount: number;
       readonly durationMs: number;
     };
+
+export type RelaxedResult = {
+  readonly kind: "relaxed";
+  readonly relaxed: readonly RelaxedSearch[];
+  readonly durationMs: number;
+};
 
 export type SearchReply =
   | { readonly id: number; readonly result: SearchResult }

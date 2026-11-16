@@ -18,6 +18,7 @@ import type {
   MatchAttribution,
   SearchHit,
   SearchMatch,
+  RelaxedResponse,
   SearchResponse,
   SessionSearchResponse,
   SessionSummary,
@@ -861,6 +862,9 @@ async function runSearch(query: string, input: FilterInput): Promise<void> {
       if (seq !== searchSeq) return;
       excludedMatchCount = result.excludedMatchCount;
       renderMultiSessionResults(result);
+      if (result.sessions.length === 0) {
+        void showRelaxed(query, conditions, seq);
+      }
     }
     shownFilterQuery = conditions;
     const excludedText = describeExcluded(input, excludedMatchCount);
@@ -1050,6 +1054,46 @@ function renderMatches(matches: readonly SearchMatch[]): HTMLElement {
 }
 
 /** 확신에 찬 0건이 가장 위험한 답이다 (ADR-0004) — 색인 중이거나 실패 세션이 있으면 덧붙인다. */
+/**
+ * 0건 검색의 "낱말 하나를 빼면" 안내. 남은 낱말이 흔하면 수 초가 걸려
+ * 검색 결과와 따로 받고, 그 사이 다른 검색이 시작됐으면 버린다.
+ */
+async function showRelaxed(
+  query: string,
+  conditions: string,
+  seq: number,
+): Promise<void> {
+  try {
+    const r = await getJson<RelaxedResponse>(
+      `/api/search/relaxed?q=${encodeURIComponent(query)}${conditions}`,
+    );
+    if (seq !== searchSeq || r.relaxed.length === 0) return;
+    searchResultsEl.append(relaxedNote(r.relaxed));
+  } catch {
+    // 덧붙이는 안내라 실패해도 "찾지 못했습니다"는 그대로 둔다
+  }
+}
+
+/** 0건일 때 낱말 하나를 빼면 걸리는 세션 수와, 그 검색을 다시 하는 버튼. */
+function relaxedNote(relaxed: RelaxedResponse["relaxed"]): HTMLElement {
+  const note = Object.assign(document.createElement("p"), {
+    className: "muted search-relaxed",
+  });
+  note.append("낱말을 하나 빼면: ");
+  for (const [i, r] of relaxed.entries()) {
+    if (i > 0) note.append(" · ");
+    const button = Object.assign(document.createElement("button"), {
+      type: "button",
+      textContent: `‘${r.term}’ 빼고 찾기 (세션 ${r.sessionCount}개)`,
+    });
+    button.addEventListener("click", () => {
+      searchForm.searchFor(r.query);
+    });
+    note.append(button);
+  }
+  return note;
+}
+
 function noMatchesNote(index: IndexStatus): HTMLElement {
   const p = document.createElement("p");
   p.className = "muted";

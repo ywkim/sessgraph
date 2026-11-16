@@ -21,6 +21,7 @@ import type {
   NodeBody,
   SearchFilters,
   SearchMatch,
+  RelaxedResponse,
   SearchResponse,
   SessionSearchResponse,
   SessionSummary,
@@ -331,6 +332,24 @@ export function createRequestHandler(
           indexReady: body.index.ready,
           durationMs: body.durationMs,
         });
+        return body;
+      });
+      return;
+    }
+
+    // 0건일 때만 부른다. 남은 낱말이 흔하면 수 초가 걸려 검색 응답과 나눈다
+    if (url.pathname === "/api/search/relaxed") {
+      const q = validQuery(url, res);
+      if (q === null) return;
+      const filters = validFilters(url, res);
+      if (filters === null) return;
+      void respondSearch(res, search, async (client) => {
+        const r = await client.relaxedAll(q, filters);
+        const body: RelaxedResponse = {
+          query: q,
+          relaxed: r.relaxed,
+          durationMs: r.durationMs,
+        };
         return body;
       });
       return;

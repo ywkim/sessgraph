@@ -523,6 +523,46 @@ describe("검색 조건", () => {
     store.close();
   });
 
+  it("낱말 하나씩 뺀 검색의 세션 수를 세션 수가 많은 순으로 돌려준다", () => {
+    const store = SearchStore.open(cacheDir());
+    const a = session([user("renew certificate soon", "2026-01-01T00:00:00Z")]);
+    const b = session([user("renew payment today", "2026-01-02T00:00:00Z")]);
+    const c = session([user("renew payment again", "2026-01-03T00:00:00Z")]);
+    for (const file of [a, b, c]) store.sync(file);
+    const paths = new Set([a, b, c]);
+
+    assert.equal(
+      store.searchAll("renew certificate payment", paths).sessions.length,
+      0,
+    );
+    // 걸리지 않는 검색은 넣지 않는다
+    assert.deepEqual(store.relaxedAll("renew certificate payment", paths), [
+      { term: "certificate", query: "renew payment", sessionCount: 2 },
+      { term: "payment", query: "renew certificate", sessionCount: 1 },
+    ]);
+    // 낱말이 하나이거나 구(phrase)이거나 걸리는 것이 없으면 비어 있다
+    assert.deepEqual(store.relaxedAll("renew", paths), []);
+    assert.deepEqual(
+      store.relaxedAll('"renew certificate payment"', paths),
+      [],
+    );
+    assert.deepEqual(store.relaxedAll("nothinghere zzqq", paths), []);
+    // 낱말이 7개 이상이면 세지 않는다
+    assert.deepEqual(store.relaxedAll("a1 a2 a3 a4 a5 a6 renew", paths), []);
+    // 등록되지 않은 경로는 세지 않는다
+    assert.deepEqual(
+      store.relaxedAll("renew certificate payment", new Set([a])),
+      [{ term: "payment", query: "renew certificate", sessionCount: 1 }],
+    );
+    // 종류 조건을 건다
+    const toolOnly = { since: null, until: null, tiers: ["tool" as const] };
+    assert.deepEqual(
+      store.relaxedAll("renew certificate payment", paths, toolOnly),
+      [],
+    );
+    store.close();
+  });
+
   it("종류 조건 때문에 빠진 매치의 수를 세 질의 경로에서 같게 센다", () => {
     const store = SearchStore.open(cacheDir());
     const file = f();

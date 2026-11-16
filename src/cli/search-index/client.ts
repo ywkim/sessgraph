@@ -80,6 +80,18 @@ export class SearchIndexClient {
     }) as Promise<SearchResult & { kind: "one" }>;
   }
 
+  relaxedAll(
+    query: string,
+    filters: SearchFilters = NO_FILTERS,
+  ): Promise<SearchResult & { kind: "relaxed" }> {
+    return this.#send({
+      id: this.#nextId++,
+      kind: "relaxed",
+      query,
+      filters,
+    }) as Promise<SearchResult & { kind: "relaxed" }>;
+  }
+
   async close(): Promise<void> {
     await this.#worker.terminate();
   }

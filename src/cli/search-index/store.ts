@@ -18,7 +18,7 @@ import { DatabaseSync } from "node:sqlite";
 
 import { NO_FILTERS } from "../../core/search-filters.js";
 import { extractSearchRows, type SearchTier } from "../../core/search-text.js";
-import type { SearchFilters } from "../../core/types.js";
+import type { RelaxedSearch, SearchFilters } from "../../core/types.js";
 import { bigramQuery, bigramTokens } from "./bigram.js";
 
 const SCHEMA_VERSION = "2";
@@ -31,6 +31,9 @@ const NEWLINE = 0x0a;
 export const SESSION_MATCH_LIMIT = 1000;
 export const SESSIONS_LIMIT = 50;
 export const MATCHES_PER_SESSION = 20;
+/** 0건일 때 낱말을 하나씩 빼 보는 검색어의 낱말 수 상한 */
+const RELAXED_TERMS_LIMIT = 6;
+
 /** Spec "발췌" — 매치 앞뒤 코드 포인트 수. */
 const EXCERPT_RADIUS = 120;
 
@@ -249,6 +252,33 @@ export class SearchStore {
       truncatedSessions: groups.length > SESSIONS_LIMIT,
       excludedMatchCount: this.#excludedCount(query, null, filters, paths),
     };
+  }
+
+  /**
+   * 낱말이 둘 이상인 검색이 0건일 때, 낱말을 하나씩 뺀 검색의 세션 수. 세션이
+   * 하나라도 걸리는 것만 세션 수가 많은 순으로 돌려준다. 남은 낱말이 흔하면
+   * 수 초가 걸리므로 검색 응답과 따로 부른다.
+   */
+  relaxedAll(
+    query: string,
+    paths: ReadonlySet<string>,
+    filters: SearchFilters = NO_FILTERS,
+  ): RelaxedSearch[] {
+    const terms = searchTerms(query);
+    if (terms.length < 2 || terms.length > RELAXED_TERMS_LIMIT) return [];
+    const out: RelaxedSearch[] = [];
+    for (const term of terms) {
+      const rest = terms.filter((t) => t !== term).join(" ");
+      const { fromWhere, params } = this.#fromWhere(rest, null, filters);
+      const rows = this.#db
+        .prepare(
+          `SELECT rows.path AS path FROM ${fromWhere} GROUP BY rows.path`,
+        )
+        .all(...params) as unknown as { path: string }[];
+      const sessionCount = rows.filter((r) => paths.has(r.path)).length;
+      if (sessionCount > 0) out.push({ term, query: rest, sessionCount });
+    }
+    return out.sort((a, b) => b.sessionCount - a.sessionCount);
   }
 
   /** 세션 하나 검색 (Spec "순위와 상한"). */

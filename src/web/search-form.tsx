@@ -87,6 +87,8 @@ export function SearchForm(props: SearchFormProps) {
 export interface SearchFormHandle {
   /** 종류를 켠다. 검색어가 있으면 다시 찾는다. */
   enableTiers(tiers: readonly Tier[]): void;
+  /** 검색어를 바꾸고 다시 찾는다. */
+  searchFor(query: string): void;
 }
 
 /**
@@ -122,5 +124,6 @@ export function mountSearchForm(
 
   return {
     enableTiers: (tiers) => update(withTiers(state, tiers), true),
+    searchFor: (query) => update(withQuery(state, query), true),
   };
 }
