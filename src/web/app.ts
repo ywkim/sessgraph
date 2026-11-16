@@ -38,11 +38,9 @@ import {
   describeFilters,
   excludedTiers,
   filterQuery,
-  PERIODS,
   type FilterInput,
-  type Period,
-  type Tier,
 } from "./search-filters.js";
+import { mountSearchForm } from "./search-form.js";
 
 // 레인 렌더링 개수 상한 — 실측(scripts/measure-branch-structure.mjs)에서
 // laneDepth<=4가 세션의 68%를 덮는다. 그 이상(p90=10, max=41)은 컬럼을
@@ -63,18 +61,7 @@ const summaryEl = document.getElementById("summary")!;
 const bannerEl = document.getElementById("banner")!;
 const warningsEl = document.getElementById("warnings")!;
 const timelineEl = document.getElementById("timeline")!;
-const searchFormEl = document.getElementById("search-form") as HTMLFormElement;
-const searchInputEl = document.getElementById(
-  "search-input",
-) as HTMLInputElement;
 const searchResultsEl = document.getElementById("search-results")!;
-const searchFiltersEl = document.getElementById("search-filters")!;
-const searchPeriodEl = document.getElementById(
-  "search-period",
-) as HTMLSelectElement;
-for (const period of PERIODS) {
-  searchPeriodEl.append(new Option(period.label, period.value));
-}
 
 const bodyCache = new Map<string, string>();
 
@@ -205,26 +192,11 @@ interface LoadedSegment {
 }
 const segmentLoads = new WeakMap<HTMLElement, Promise<LoadedSegment | null>>();
 
-searchFormEl.addEventListener("submit", (e) => {
-  e.preventDefault();
-  void runSearch(searchInputEl.value.trim());
-});
-
-/** 조건을 바꾸면 검색어가 있을 때 다시 찾는다 (Spec "검색 조건 입력"). */
-searchFiltersEl.addEventListener("change", () => {
-  const query = searchInputEl.value.trim();
-  if (query) void runSearch(query);
-});
-
-function readFilterInput(): FilterInput {
-  const tiers = new Set<Tier>();
-  for (const box of Array.from(
-    searchFiltersEl.querySelectorAll<HTMLInputElement>('input[name="tier"]'),
-  )) {
-    if (box.checked) tiers.add(box.value as Tier);
-  }
-  return { tiers, period: searchPeriodEl.value as Period };
-}
+/** 입력줄은 컴포넌트가 소유한다. 여기서는 찾기 알림만 받는다 (ADR-0010). */
+const searchForm = mountSearchForm(
+  document.getElementById("search-form-root")!,
+  (query, input) => void runSearch(query, input),
+);
 
 /** 화면에 떠 있는 결과를 만든 검색의 조건. 결과를 눌렀을 때 귀속 요청에 싣는다. */
 let shownFilterQuery = "";
@@ -851,13 +823,12 @@ function discardPendingSearch(): void {
 }
 
 /** 세션이 열려 있으면 그 안에서만, 목록 화면이면 전 세션에서 찾는다. */
-async function runSearch(query: string): Promise<void> {
+async function runSearch(query: string, input: FilterInput): Promise<void> {
   const seq = ++searchSeq;
   if (!query) {
     searchResultsEl.innerHTML = "";
     return;
   }
-  const input = readFilterInput();
   if (input.tiers.size === 0) {
     searchResultsEl.innerHTML = "";
     searchResultsEl.append(errorLine("종류를 하나 이상 고르세요"));
@@ -925,13 +896,7 @@ function excludedNote(text: string, input: FilterInput): HTMLElement {
     textContent: "함께 보기",
   });
   button.addEventListener("click", () => {
-    for (const tier of excludedTiers(input)) {
-      const box = searchFiltersEl.querySelector<HTMLInputElement>(
-        `input[name="tier"][value="${tier}"]`,
-      );
-      if (box) box.checked = true;
-    }
-    searchFiltersEl.dispatchEvent(new Event("change"));
+    searchForm.enableTiers(excludedTiers(input));
   });
   note.append(button);
   return note;

@@ -16,8 +16,8 @@
     "type-check": "tsc --noEmit && tsc -p tsconfig.web.json --noEmit",
     "test": "npm run build && node --test \"dist/**/*.test.js\"",
     "lint": "eslint .",
-    "format": "prettier --write \"**/*.{ts,js,json,md}\"",
-    "format:check": "prettier --check \"**/*.{ts,js,json,md}\"",
+    "format": "prettier --write \"**/*.{ts,tsx,js,json,md}\"",
+    "format:check": "prettier --check \"**/*.{ts,tsx,js,json,md}\"",
     "lint:docs": "npm run lint:docs:prd && npm run lint:docs:design && npm run lint:docs:adr && npm run lint:docs:structure",
     "lint:docs:prd": "node scripts/lint-prd-purity.js",
     "lint:docs:design": "node scripts/lint-design-doc.js",
@@ -33,6 +33,7 @@
     "typescript-eslint": "^8.69.0"
   },
   "dependencies": {
-    "marked": "18.1.2"
+    "marked": "18.1.2",
+    "preact": "11.1.1"
   }
 }
