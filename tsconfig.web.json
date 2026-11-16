@@ -13,8 +13,12 @@
     // `web/app.js`만 `dist/web/`로 옮긴 뒤 임시 경로를 지운다.
     "outDir": "dist/.web-build",
     "declaration": false,
-    "sourceMap": false
+    "sourceMap": false,
+    // JSX는 Preact가 해석한다. 컴파일 결과가 `preact/jsx-runtime`을 import하고
+    // index.html의 importmap이 그 이름을 vendor/로 잇는다 (ADR-0010).
+    "jsx": "react-jsx",
+    "jsxImportSource": "preact"
   },
-  "include": ["src/web/**/*.ts"],
+  "include": ["src/web/**/*.ts", "src/web/**/*.tsx"],
   "exclude": ["node_modules", "dist"]
 }

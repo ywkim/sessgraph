@@ -25,7 +25,7 @@ export default tseslint.config(
   },
   {
     // node:test의 최상위 test()는 관용적으로 await하지 않는다 (러너가 프로세스 종료 전 대기)
-    files: ["**/*.test.ts"],
+    files: ["**/*.test.ts", "**/*.test.tsx"],
     rules: {
       "@typescript-eslint/no-floating-promises": "off",
     },

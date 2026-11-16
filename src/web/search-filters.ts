@@ -5,7 +5,7 @@
 export type Tier = "conversation" | "tool" | "meta";
 
 export const TIER_ORDER: readonly Tier[] = ["conversation", "tool", "meta"];
-const TIER_NAME: Record<Tier, string> = {
+export const TIER_NAME: Record<Tier, string> = {
   conversation: "대화",
   tool: "도구",
   meta: "기타",

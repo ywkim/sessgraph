@@ -76,6 +76,18 @@ cpSync(
   path.join(to, "vendor", "marked.esm.js"),
 );
 
+// Preact도 같은 방식으로 전달한다 (docs/adr/ADR-0010-preact-for-isolated-components.md).
+// 패키지의 ESM 파일은 확장자가 `.mjs`인데 `serve`의 MIME 표에는 `.js`만 있어
+// 브라우저가 모듈로 받지 않는다. 그래서 `.js` 이름으로 복사한다. 파일 안의
+// `import "preact"`는 importmap이 같은 vendor 경로로 푼다.
+const preactDist = path.join(root, "node_modules", "preact");
+for (const [file, name] of [
+  ["dist/preact.mjs", "preact.js"],
+  ["jsx-runtime/dist/jsxRuntime.mjs", "preact-jsx-runtime.js"],
+]) {
+  cpSync(path.join(preactDist, file), path.join(to, "vendor", name));
+}
+
 rmSync(path.join(root, "dist", ".web-build"), {
   recursive: true,
   force: true,

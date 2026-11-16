@@ -11,41 +11,19 @@
       <h1>sessgraph</h1>
       <p id="summary" class="muted">읽는 중…</p>
     </header>
-    <form id="search-form" class="search-form">
-      <input
-        id="search-input"
-        type="search"
-        name="q"
-        placeholder="본문에서 찾기…"
-        autocomplete="off"
-      />
-      <button type="submit">찾기</button>
-      <div class="search-filters" id="search-filters">
-        <fieldset class="search-tiers">
-          <legend>종류</legend>
-          <label
-            ><input
-              type="checkbox"
-              name="tier"
-              value="conversation"
-              checked
-            />대화</label
-          >
-          <label><input type="checkbox" name="tier" value="tool" />도구</label>
-          <label><input type="checkbox" name="tier" value="meta" />기타</label>
-        </fieldset>
-        <label class="search-period"
-          >기간
-          <select id="search-period"></select>
-        </label>
-      </div>
-    </form>
+    <div id="search-form-root"></div>
     <div id="search-results"></div>
     <div id="banner" hidden></div>
     <div id="warnings"></div>
     <main id="timeline"></main>
     <script type="importmap">
-      { "imports": { "marked": "/vendor/marked.esm.js" } }
+      {
+        "imports": {
+          "marked": "/vendor/marked.esm.js",
+          "preact": "/vendor/preact.js",
+          "preact/jsx-runtime": "/vendor/preact-jsx-runtime.js"
+        }
+      }
     </script>
     <script type="module" src="/app.js"></script>
   </body>
