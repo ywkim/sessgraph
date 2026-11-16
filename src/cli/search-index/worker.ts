@@ -108,6 +108,7 @@ function handle(req: SearchRequest): SearchReply {
         sessions: r.sessions,
         truncatedSessions: r.truncatedSessions,
         excludedMatchCount: r.excludedMatchCount,
+        relaxed: r.relaxed,
         durationMs: performance.now() - start,
       };
     } else {

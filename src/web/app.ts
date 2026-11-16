@@ -933,6 +933,9 @@ function renderMultiSessionResults(result: SearchResponse): void {
   searchResultsEl.append(...indexNotes(result.index));
   if (result.sessions.length === 0) {
     searchResultsEl.append(noMatchesNote(result.index));
+    if (result.relaxed.length > 0) {
+      searchResultsEl.append(relaxedNote(result.relaxed));
+    }
     return;
   }
   if (result.truncatedSessions) {
@@ -1050,6 +1053,26 @@ function renderMatches(matches: readonly SearchMatch[]): HTMLElement {
 }
 
 /** 확신에 찬 0건이 가장 위험한 답이다 (ADR-0004) — 색인 중이거나 실패 세션이 있으면 덧붙인다. */
+/** 0건일 때 낱말 하나를 빼면 걸리는 세션 수와, 그 검색을 다시 하는 버튼. */
+function relaxedNote(relaxed: SearchResponse["relaxed"]): HTMLElement {
+  const note = Object.assign(document.createElement("p"), {
+    className: "muted search-relaxed",
+  });
+  note.append("낱말을 하나 빼면: ");
+  for (const [i, r] of relaxed.entries()) {
+    if (i > 0) note.append(" · ");
+    const button = Object.assign(document.createElement("button"), {
+      type: "button",
+      textContent: `‘${r.term}’ 빼고 찾기 (세션 ${r.sessionCount}개)`,
+    });
+    button.addEventListener("click", () => {
+      searchForm.searchFor(r.query);
+    });
+    note.append(button);
+  }
+  return note;
+}
+
 function noMatchesNote(index: IndexStatus): HTMLElement {
   const p = document.createElement("p");
   p.className = "muted";

@@ -319,6 +319,7 @@ export function createRequestHandler(
           sessions,
           truncatedSessions: r.truncatedSessions,
           excludedMatchCount: r.excludedMatchCount,
+          relaxed: r.relaxed,
           durationMs: performance.now() - start,
         };
         searchLog?.record({

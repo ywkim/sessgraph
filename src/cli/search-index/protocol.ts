@@ -3,7 +3,7 @@
  * 메인 스레드는 이 파일과 client.ts만 본다.
  */
 import type { SearchTier } from "../../core/search-text.js";
-import type { SearchFilters } from "../../core/types.js";
+import type { RelaxedSearch, SearchFilters } from "../../core/types.js";
 
 export interface WorkerInit {
   readonly cacheDir: string;
@@ -61,6 +61,8 @@ export type SearchResult =
       readonly truncatedSessions: boolean;
       /** 종류 조건 때문에 빠진 매치의 수 */
       readonly excludedMatchCount: number;
+      /** 0건일 때 낱말 하나를 뺀 검색이 걸리는 세션 수 */
+      readonly relaxed: readonly RelaxedSearch[];
       readonly durationMs: number;
     }
   | {
