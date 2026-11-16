@@ -97,6 +97,18 @@ function handle(req: SearchRequest): SearchReply {
   }
   const start = performance.now();
   try {
+    if (req.kind === "relaxed") {
+      // 직전 전 세션 검색이 이미 색인을 맞췄으므로 다시 맞추지 않는다
+      const { eligible } = progress(store);
+      return {
+        id: req.id,
+        result: {
+          kind: "relaxed",
+          relaxed: store.relaxedAll(req.query, eligible, req.filters),
+          durationMs: performance.now() - start,
+        },
+      };
+    }
     refresh(store, req.kind === "all" ? init.paths : [req.path]);
     const { index, eligible } = progress(store);
     let result: SearchResult;
@@ -108,7 +120,6 @@ function handle(req: SearchRequest): SearchReply {
         sessions: r.sessions,
         truncatedSessions: r.truncatedSessions,
         excludedMatchCount: r.excludedMatchCount,
-        relaxed: r.relaxed,
         durationMs: performance.now() - start,
       };
     } else {

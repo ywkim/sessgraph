@@ -471,6 +471,14 @@ export interface RelaxedSearch {
   readonly sessionCount: number;
 }
 
+/** `/api/search/relaxed` */
+export interface RelaxedResponse {
+  readonly query: string;
+  /** 낱말 하나를 뺀 검색이 걸리는 세션 수(많은 순). 낱말이 2~6개가 아니거나 걸리는 것이 없으면 빈 배열 */
+  readonly relaxed: readonly RelaxedSearch[];
+  readonly durationMs: number;
+}
+
 /** `/api/search` */
 export interface SearchResponse {
   readonly query: string;
@@ -480,8 +488,6 @@ export interface SearchResponse {
   readonly truncatedSessions: boolean;
   /** 종류 조건 때문에 빠진 매치의 수. 종류 조건이 없으면 0 */
   readonly excludedMatchCount: number;
-  /** 결과가 0건이고 낱말이 둘 이상일 때, 낱말 하나를 뺀 검색이 걸리는 세션 수(많은 순). 아니면 빈 배열 */
-  readonly relaxed: readonly RelaxedSearch[];
   readonly durationMs: number;
 }
 

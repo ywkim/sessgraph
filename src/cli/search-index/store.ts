@@ -223,7 +223,6 @@ export class SearchStore {
     readonly sessions: PathHits[];
     readonly truncatedSessions: boolean;
     readonly excludedMatchCount: number;
-    readonly relaxed: RelaxedSearch[];
   } {
     const byPath = new Map<string, Hit[]>();
     for (const hit of this.#match(query, null, filters)) {
@@ -252,19 +251,18 @@ export class SearchStore {
       sessions,
       truncatedSessions: groups.length > SESSIONS_LIMIT,
       excludedMatchCount: this.#excludedCount(query, null, filters, paths),
-      relaxed:
-        groups.length === 0 ? this.#relaxedQueries(query, filters, paths) : [],
     };
   }
 
   /**
-   * 낱말이 둘 이상인 검색이 0건일 때, 낱말을 하나씩 뺀 검색의 세션 수.
-   * 세션이 하나라도 걸리는 것만 낱말이 많이 걸러낸 순으로 돌려준다.
+   * 낱말이 둘 이상인 검색이 0건일 때, 낱말을 하나씩 뺀 검색의 세션 수. 세션이
+   * 하나라도 걸리는 것만 세션 수가 많은 순으로 돌려준다. 남은 낱말이 흔하면
+   * 수 초가 걸리므로 검색 응답과 따로 부른다.
    */
-  #relaxedQueries(
+  relaxedAll(
     query: string,
-    filters: SearchFilters,
     paths: ReadonlySet<string>,
+    filters: SearchFilters = NO_FILTERS,
   ): RelaxedSearch[] {
     const terms = searchTerms(query);
     if (terms.length < 2 || terms.length > RELAXED_TERMS_LIMIT) return [];

@@ -24,6 +24,12 @@ export type SearchRequest =
       readonly query: string;
       readonly path: string;
       readonly filters: SearchFilters;
+    }
+  | {
+      readonly id: number;
+      readonly kind: "relaxed";
+      readonly query: string;
+      readonly filters: SearchFilters;
     };
 
 export interface IndexProgress {
@@ -54,6 +60,7 @@ export interface WorkerSessionHits {
 }
 
 export type SearchResult =
+  | RelaxedResult
   | {
       readonly kind: "all";
       readonly index: IndexProgress;
@@ -61,8 +68,6 @@ export type SearchResult =
       readonly truncatedSessions: boolean;
       /** 종류 조건 때문에 빠진 매치의 수 */
       readonly excludedMatchCount: number;
-      /** 0건일 때 낱말 하나를 뺀 검색이 걸리는 세션 수 */
-      readonly relaxed: readonly RelaxedSearch[];
       readonly durationMs: number;
     }
   | {
@@ -74,6 +79,12 @@ export type SearchResult =
       readonly excludedMatchCount: number;
       readonly durationMs: number;
     };
+
+export type RelaxedResult = {
+  readonly kind: "relaxed";
+  readonly relaxed: readonly RelaxedSearch[];
+  readonly durationMs: number;
+};
 
 export type SearchReply =
   | { readonly id: number; readonly result: SearchResult }

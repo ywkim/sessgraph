@@ -523,7 +523,7 @@ describe("검색 조건", () => {
     store.close();
   });
 
-  it("낱말이 둘 이상인 검색이 0건이면 낱말 하나씩 뺀 검색의 세션 수를 돌려준다", () => {
+  it("낱말 하나씩 뺀 검색의 세션 수를 세션 수가 많은 순으로 돌려준다", () => {
     const store = SearchStore.open(cacheDir());
     const a = session([user("renew certificate soon", "2026-01-01T00:00:00Z")]);
     const b = session([user("renew payment today", "2026-01-02T00:00:00Z")]);
@@ -531,25 +531,34 @@ describe("검색 조건", () => {
     for (const file of [a, b, c]) store.sync(file);
     const paths = new Set([a, b, c]);
 
-    const r = store.searchAll("renew certificate payment", paths);
-    assert.equal(r.sessions.length, 0);
-    // 낱말을 뺀 쪽의 세션 수가 많은 것부터. 걸리지 않는 검색은 넣지 않는다
-    assert.deepEqual(r.relaxed, [
+    assert.equal(
+      store.searchAll("renew certificate payment", paths).sessions.length,
+      0,
+    );
+    // 걸리지 않는 검색은 넣지 않는다
+    assert.deepEqual(store.relaxedAll("renew certificate payment", paths), [
       { term: "certificate", query: "renew payment", sessionCount: 2 },
       { term: "payment", query: "renew certificate", sessionCount: 1 },
     ]);
-
-    // 결과가 있거나 낱말이 하나이거나 구(phrase)이면 비어 있다
-    assert.deepEqual(store.searchAll("renew payment", paths).relaxed, []);
-    assert.deepEqual(store.searchAll("nothinghere", paths).relaxed, []);
+    // 낱말이 하나이거나 구(phrase)이거나 걸리는 것이 없으면 비어 있다
+    assert.deepEqual(store.relaxedAll("renew", paths), []);
     assert.deepEqual(
-      store.searchAll('"renew certificate payment"', paths).relaxed,
+      store.relaxedAll('"renew certificate payment"', paths),
       [],
     );
+    assert.deepEqual(store.relaxedAll("nothinghere zzqq", paths), []);
+    // 낱말이 7개 이상이면 세지 않는다
+    assert.deepEqual(store.relaxedAll("a1 a2 a3 a4 a5 a6 renew", paths), []);
     // 등록되지 않은 경로는 세지 않는다
     assert.deepEqual(
-      store.searchAll("renew certificate payment", new Set([a])).relaxed,
+      store.relaxedAll("renew certificate payment", new Set([a])),
       [{ term: "payment", query: "renew certificate", sessionCount: 1 }],
+    );
+    // 종류 조건을 건다
+    const toolOnly = { since: null, until: null, tiers: ["tool" as const] };
+    assert.deepEqual(
+      store.relaxedAll("renew certificate payment", paths, toolOnly),
+      [],
     );
     store.close();
   });
