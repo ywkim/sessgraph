@@ -91,6 +91,20 @@ describe("SearchStore", () => {
     store.close();
   });
 
+  it("3글자 이상 낱말과 2글자 낱말을 섞어도 2글자의 비ASCII 대소문자를 무시한다", () => {
+    const store = SearchStore.open(cacheDir());
+    const f = session([
+      user("Éa Manager 설정", "2026-01-01T00:00:00Z"),
+      user("Manager 설정만", "2026-01-01T00:00:01Z"),
+    ]);
+    store.sync(f);
+    assert.equal(store.searchOne("manager éa", f).matchCount, 1);
+    assert.equal(store.searchOne("manager 없다", f).matchCount, 0);
+    const all = store.searchAll("설정 éa manager", new Set([f]));
+    assert.equal(all.sessions[0]!.matchCount, 1);
+    store.close();
+  });
+
   it("FTS 연산자와 따옴표를 글자 그대로 찾는다", () => {
     const store = SearchStore.open(cacheDir());
     const f = session([

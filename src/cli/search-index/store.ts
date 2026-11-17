@@ -372,8 +372,10 @@ export class SearchStore {
       where.push("rows MATCH ?");
       params.push(trigramPhrases.join(" "));
       if (bigramTokens.length > 0) {
+        // `IN (SELECT …)`는 서브쿼리를 통째로 만들어 trigram이 0건으로 좁혀도 2글자
+        // 낱말의 모든 행(`pr`은 수십만)을 훑는다. 좁혀진 행마다 rowid로 조회한다
         where.push(
-          "rows.rowid IN (SELECT rowid FROM bigrams WHERE bigrams MATCH ?)",
+          "EXISTS (SELECT 1 FROM bigrams WHERE bigrams.rowid = rows.rowid AND bigrams MATCH ?)",
         );
         params.push(bigramTokens.join(" "));
       }
