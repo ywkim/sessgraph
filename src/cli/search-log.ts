@@ -23,6 +23,8 @@ export type SearchLogEvent =
       readonly matchCount: number;
       readonly indexReady: boolean;
       readonly durationMs: number;
+      /** 전 세션 검색에만 있다. 이어지는 open·answer·notfound가 이 값으로 검색에 이어진다 */
+      readonly searchId?: string;
     }
   | {
       readonly kind: "open";
@@ -34,6 +36,33 @@ export type SearchLogEvent =
       /** 전 세션 결과에서 그 세션의 순위 (1부터) */
       readonly rank: number;
       readonly uuid: string;
+      /** 화면이 실어 보낸 검색 id. 없으면 어느 검색에서 눌렀는지 잇지 못한다 */
+      readonly searchId?: string;
+    }
+  | {
+      /** 매치 하나를 "이게 답"으로 표시했다 */
+      readonly kind: "answer";
+      readonly at: string;
+      readonly searchId: string;
+      readonly query: string;
+      readonly filters: SearchFilters;
+      readonly sessionId: string;
+      /** 전 세션 결과에서 그 세션의 순위 (1부터) */
+      readonly rank: number;
+      /** 그 세션이 보여 준 매치 중 이 매치의 위치 (1부터) */
+      readonly snippetIndex: number;
+      readonly uuid: string;
+      /** 그 세션이 보여 준 매치의 uuid, 화면 순서. uuid가 없는 매치는 null */
+      readonly shown: readonly (string | null)[];
+    }
+  | {
+      /** 이 검색에서 원하는 것을 못 찾았다고 표시했다 */
+      readonly kind: "notfound";
+      readonly at: string;
+      readonly searchId: string;
+      readonly query: string;
+      readonly filters: SearchFilters;
+      readonly matchCount: number;
     };
 
 type WithoutAt<T> = T extends unknown ? Omit<T, "at"> : never;

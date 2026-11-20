@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { closeSync, existsSync, openSync, readSync, statSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { createServer } from "node:http";
@@ -265,6 +265,24 @@ function ensureFresh(
   }
 }
 
+/** 서버가 발급하는 검색 id. 16자리 16진수다 */
+const SEARCH_ID_PATTERN = /^[0-9a-f]{16}$/;
+
+/** 서버가 기억하는 최근 전 세션 검색의 수. "이게 답" 기록을 채우는 데만 쓴다 */
+export const ISSUED_SEARCH_LIMIT = 100;
+
+/** 화면에 내보낸 전 세션 검색 하나. 기록이 화면과 같은 목록을 가리키게 한다 */
+interface IssuedSearch {
+  readonly query: string;
+  readonly filters: SearchFilters;
+  readonly matchCount: number;
+  /** 순위 순. `uuids`는 그 세션이 보여 준 매치의 uuid이고 uuid가 없는 매치는 null */
+  readonly sessions: readonly {
+    readonly sessionId: string;
+    readonly uuids: readonly (string | null)[];
+  }[];
+}
+
 /**
  * 여러 세션 위에서 동작하는 읽기 전용 요청 핸들러를 만든다.
  *
@@ -280,6 +298,7 @@ export function createRequestHandler(
 ): (req: IncomingMessage, res: ServerResponse) => void {
   const byPath = new Map<string, SessionEntry>();
   for (const entry of registry.values()) byPath.set(entry.filePath, entry);
+  const issued = new Map<string, IssuedSearch>();
 
   return (req, res) => {
     // ADR-0003: 쓰기 API를 갖지 않는다. 경로 존재 여부와 무관하게 405다 —
@@ -314,23 +333,41 @@ export function createRequestHandler(
           matchCount: hits.matchCount,
           matches: hits.matches,
         }));
+        const searchId = randomBytes(8).toString("hex");
         const body: SearchResponse = {
           query: q,
+          searchId,
           index: indexStatus(r.index, byPath, []),
           sessions,
           truncatedSessions: r.truncatedSessions,
           excludedMatchCount: r.excludedMatchCount,
           durationMs: performance.now() - start,
         };
+        const matchCount = sessions.reduce((n, s) => n + s.matchCount, 0);
+        if (searchLog !== null) {
+          issued.set(searchId, {
+            query: q,
+            filters,
+            matchCount,
+            sessions: sessions.map((s) => ({
+              sessionId: s.sessionId,
+              uuids: s.matches.map((m) => m.uuid),
+            })),
+          });
+          if (issued.size > ISSUED_SEARCH_LIMIT) {
+            issued.delete(issued.keys().next().value!);
+          }
+        }
         searchLog?.record({
           kind: "search",
           query: q,
           filters,
           sessionId: null,
           results: sessions.map((s) => s.sessionId),
-          matchCount: sessions.reduce((n, s) => n + s.matchCount, 0),
+          matchCount,
           indexReady: body.index.ready,
           durationMs: body.durationMs,
+          searchId,
         });
         return body;
       });
@@ -352,6 +389,17 @@ export function createRequestHandler(
         };
         return body;
       });
+      return;
+    }
+
+    // 화면의 "이게 답"·"못 찾았다". GET이 기록을 남기는 것은 `/attribution`의
+    // open과 같다 (Spec "검색 기록"). HEAD는 기록하지 않는다
+    if (url.pathname === "/api/search/feedback") {
+      if (req.method !== "GET") {
+        sendJson(res, 405, { error: "기록은 GET으로만 남깁니다" });
+        return;
+      }
+      recordFeedback(url, res, issued, searchLog);
       return;
     }
 
@@ -431,6 +479,8 @@ export function createRequestHandler(
       // 조건이 올바르지 않으면 응답은 그대로 하고 open만 남기지 않는다
       const parsed = parseSearchFilters(filterParams(url));
       if (fromQuery && Number.isInteger(rank) && rank > 0 && parsed.ok) {
+        // 서버가 발급한 형식이 아닌 값은 버린다. 로그에 임의의 문자열을 남기지 않는다
+        const searchId = url.searchParams.get("searchId") ?? "";
         searchLog?.record({
           kind: "open",
           query: fromQuery,
@@ -438,6 +488,7 @@ export function createRequestHandler(
           sessionId: entry.id,
           rank,
           uuid: attributionUuid!,
+          ...(SEARCH_ID_PATTERN.test(searchId) ? { searchId } : {}),
         });
       }
       sendJson(res, 200, attributeOne(index, nodes, attributionUuid));
@@ -527,6 +578,71 @@ function validFilters(url: URL, res: ServerResponse): SearchFilters | null {
     return null;
   }
   return parsed.filters;
+}
+
+/**
+ * `answer`·`notfound` 기록 (Spec "검색 기록"). 화면은 `searchId`와 `uuid`만
+ * 보낸다. 순위·위치·표시 목록은 서버가 그 검색에 내보낸 목록에서 채우므로
+ * 화면이 보낸 값을 믿지 않고, 발급하지 않은 id나 그 결과에 없는 매치는 남기지 않는다.
+ */
+function recordFeedback(
+  url: URL,
+  res: ServerResponse,
+  issued: ReadonlyMap<string, IssuedSearch>,
+  searchLog: SearchLog | null,
+): void {
+  if (searchLog === null) {
+    sendJson(res, 503, { error: "검색 기록이 꺼져 있습니다" });
+    return;
+  }
+  const kind = url.searchParams.get("kind");
+  if (kind !== "answer" && kind !== "notfound") {
+    sendJson(res, 400, { error: "kind는 answer나 notfound여야 합니다" });
+    return;
+  }
+  const searchId = url.searchParams.get("searchId") ?? "";
+  const found = SEARCH_ID_PATTERN.test(searchId)
+    ? issued.get(searchId)
+    : undefined;
+  if (!found) {
+    sendJson(res, 404, {
+      error:
+        "찾을 수 없는 검색입니다 (서버가 다시 시작했거나 오래된 검색입니다)",
+    });
+    return;
+  }
+  if (kind === "notfound") {
+    searchLog.record({
+      kind,
+      searchId,
+      query: found.query,
+      filters: found.filters,
+      matchCount: found.matchCount,
+    });
+    sendJson(res, 200, { recorded: true });
+    return;
+  }
+  const sessionId = url.searchParams.get("sessionId") ?? "";
+  const uuid = url.searchParams.get("uuid") ?? "";
+  const at = found.sessions.findIndex((s) => s.sessionId === sessionId);
+  const shown = at < 0 ? undefined : found.sessions[at]!.uuids;
+  const index = shown === undefined || uuid === "" ? -1 : shown.indexOf(uuid);
+  if (shown === undefined || index < 0) {
+    sendJson(res, 404, { error: "그 검색 결과에 없는 매치입니다" });
+    return;
+  }
+  searchLog.record({
+    kind,
+    searchId,
+    query: found.query,
+    filters: found.filters,
+    sessionId,
+    rank: at + 1,
+    snippetIndex: index + 1,
+    uuid,
+    shown,
+  });
+  sendJson(res, 200, { recorded: true });
 }
 
 /** 색인을 열 수 없으면 503, 그 밖의 실패는 500. 다른 기능에는 영향이 없다 (Spec "기동과 첫 생성"). */
