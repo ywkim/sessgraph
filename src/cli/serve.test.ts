@@ -18,6 +18,7 @@ import { fileURLToPath } from "node:url";
 
 import { buildIndexDetailed } from "../core/build-index.js";
 import {
+  ISSUED_SEARCH_LIMIT,
   createRequestHandler,
   isStale,
   registerSessions,
@@ -505,8 +506,18 @@ test("serve: 검색과 결과에서 누른 귀속 요청을 검색 기록에 남
       // 결과에서 눌러 온 것이 아닌 귀속 요청(새로 고침)은 남기지 않는다
       await fetch(`${base}/api/session/${idB}/attribution?uuid=${U(2)}`);
 
-      const strip = ({ durationMs: _, ...rest }: Record<string, unknown>) =>
-        rest;
+      // 전 세션 검색만 id를 갖고, 그 id는 응답에도 있다
+      assert.match(all.searchId, /^[0-9a-f]{16}$/);
+      assert.deepEqual(
+        events.map((e) => (e as { searchId?: string }).searchId),
+        [all.searchId, undefined, undefined],
+      );
+
+      const strip = ({
+        durationMs: _d,
+        searchId: _s,
+        ...rest
+      }: Record<string, unknown>) => rest;
       assert.deepEqual(
         events.map((e) => strip(e as Record<string, unknown>)),
         [
@@ -536,6 +547,185 @@ test("serve: 검색과 결과에서 누른 귀속 요청을 검색 기록에 남
             rank: 2,
             uuid: U(2),
           },
+        ],
+      );
+    },
+    undefined,
+    log,
+  );
+});
+
+test("serve: 이게 답과 못 찾았다를 검색에 이어 기록하고 순위·위치·표시 목록은 서버가 채운다", async () => {
+  const a = sessionFile(
+    "a.jsonl",
+    convLine(U(1), null, "needle one") + convLine(U(3), U(1), "needle three"),
+  );
+  const b = sessionFile("b.jsonl", convLine(U(2), null, "needle two"));
+  const events: Record<string, unknown>[] = [];
+  const log: SearchLog = { record: (e) => void events.push({ ...e }) };
+  await withSearchServer(
+    [a, b],
+    async (base) => {
+      events.length = 0;
+      const all = (await (
+        await fetch(`${base}/api/search?q=needle`)
+      ).json()) as SearchResponse;
+      const target = all.sessions[1]!;
+      const hit = target.matches[target.matches.length - 1]!;
+      const feedback = (params: string) =>
+        fetch(`${base}/api/search/feedback?searchId=${all.searchId}&${params}`);
+
+      const answered = await feedback(
+        `kind=answer&sessionId=${target.sessionId}&uuid=${hit.uuid}`,
+      );
+      assert.equal(answered.status, 200);
+      const missed = await feedback("kind=notfound");
+      assert.equal(missed.status, 200);
+
+      const filters = { since: null, until: null, tiers: null };
+      assert.deepEqual(events.slice(1), [
+        {
+          kind: "answer",
+          searchId: all.searchId,
+          query: "needle",
+          filters,
+          sessionId: target.sessionId,
+          rank: 2,
+          snippetIndex: target.matches.length,
+          uuid: hit.uuid,
+          shown: target.matches.map((m) => m.uuid),
+        },
+        {
+          kind: "notfound",
+          searchId: all.searchId,
+          query: "needle",
+          filters,
+          matchCount: 3,
+        },
+      ]);
+    },
+    undefined,
+    log,
+  );
+});
+
+test("serve: 발급하지 않은 검색, 그 결과에 없는 매치, 잘못된 kind는 기록하지 않는다", async () => {
+  const a = sessionFile("a.jsonl", convLine(U(1), null, "needle one"));
+  const b = sessionFile("b.jsonl", convLine(U(2), null, "needle two"));
+  const events: unknown[] = [];
+  const log: SearchLog = { record: (e) => void events.push(e) };
+  await withSearchServer(
+    [a, b],
+    async (base) => {
+      const all = (await (
+        await fetch(`${base}/api/search?q=needle`)
+      ).json()) as SearchResponse;
+      events.length = 0;
+      const first = all.sessions[0]!;
+      const id = all.searchId;
+      const statusOf = async (params: string) =>
+        (await fetch(`${base}/api/search/feedback?${params}`)).status;
+
+      assert.equal(
+        await statusOf("searchId=0123456789abcdef&kind=notfound"),
+        404,
+      );
+      assert.equal(await statusOf("searchId=not-an-id&kind=notfound"), 404);
+      assert.equal(await statusOf(`searchId=${id}&kind=like`), 400);
+      assert.equal(await statusOf(`searchId=${id}&kind=answer`), 404);
+      assert.equal(
+        await statusOf(
+          `searchId=${id}&kind=answer&sessionId=${first.sessionId}&uuid=${U(9)}`,
+        ),
+        404,
+      );
+      assert.equal(
+        await statusOf(
+          `searchId=${id}&kind=answer&sessionId=nope&uuid=${first.matches[0]!.uuid}`,
+        ),
+        404,
+      );
+      // HEAD는 기록하지 않는다
+      const head = await fetch(
+        `${base}/api/search/feedback?searchId=${id}&kind=notfound`,
+        { method: "HEAD" },
+      );
+      assert.equal(head.status, 405);
+      assert.deepEqual(events, []);
+    },
+    undefined,
+    log,
+  );
+});
+
+test("serve: 검색 기록이 꺼져 있으면 기록 요청은 503이다", async () => {
+  const file = sessionFile("s.jsonl", convLine(U(1), null, "needle"));
+  await withSearchServer([file], async (base) => {
+    const all = (await (
+      await fetch(`${base}/api/search?q=needle`)
+    ).json()) as SearchResponse;
+    const res = await fetch(
+      `${base}/api/search/feedback?searchId=${all.searchId}&kind=notfound`,
+    );
+    assert.equal(res.status, 503);
+  });
+});
+
+test("serve: 서버가 기억하는 검색은 최근 ISSUED_SEARCH_LIMIT개다", async () => {
+  const file = sessionFile("s.jsonl", convLine(U(1), null, "needle"));
+  const log: SearchLog = { record: () => {} };
+  await withSearchServer(
+    [file],
+    async (base) => {
+      const search = async () =>
+        (
+          (await (
+            await fetch(`${base}/api/search?q=needle`)
+          ).json()) as SearchResponse
+        ).searchId;
+      const statusOf = async (id: string) =>
+        (
+          await fetch(
+            `${base}/api/search/feedback?searchId=${id}&kind=notfound`,
+          )
+        ).status;
+      const oldest = await search();
+      let newest = oldest;
+      for (let i = 1; i < ISSUED_SEARCH_LIMIT; i++) newest = await search();
+      assert.equal(await statusOf(oldest), 200);
+      // 한 개가 더 나가면 가장 오래된 검색이 밀려난다
+      newest = await search();
+      assert.equal(await statusOf(oldest), 404);
+      assert.equal(await statusOf(newest), 200);
+    },
+    undefined,
+    log,
+  );
+});
+
+test("serve: 귀속 요청의 searchId는 발급한 형식일 때만 open에 남는다", async () => {
+  const file = sessionFile("s.jsonl", convLine(U(1), null, "needle"));
+  const events: Record<string, unknown>[] = [];
+  const log: SearchLog = { record: (e) => void events.push({ ...e }) };
+  await withSearchServer(
+    [file],
+    async (base) => {
+      const id = sessionIdOf(file);
+      const all = (await (
+        await fetch(`${base}/api/search?q=needle`)
+      ).json()) as SearchResponse;
+      events.length = 0;
+      const open = (extra: string) =>
+        fetch(
+          `${base}/api/session/${id}/attribution?uuid=${U(1)}&q=needle&rank=1${extra}`,
+        );
+      await open(`&searchId=${all.searchId}`);
+      await open("&searchId=임의의 문자열");
+      assert.deepEqual(
+        events.map((e) => [e.kind, e.searchId]),
+        [
+          ["open", all.searchId],
+          ["open", undefined],
         ],
       );
     },

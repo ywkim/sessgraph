@@ -178,6 +178,7 @@ let pendingOpen: {
   query: string;
   rank: number;
   filterQuery: string;
+  searchId: string;
 } | null = null;
 
 /**
@@ -947,6 +948,15 @@ function renderMultiSessionResults(result: SearchResponse): void {
       }),
     );
   }
+  const notFound = document.createElement("div");
+  notFound.className = "search-feedback";
+  notFound.append(
+    feedbackButton("못 찾았다", "기록했습니다", {
+      searchId: result.searchId,
+      kind: "notfound",
+    }),
+  );
+  searchResultsEl.append(notFound);
   for (const [i, hits] of result.sessions.entries()) {
     const rank = i + 1;
     const box = document.createElement("div");
@@ -971,6 +981,7 @@ function renderMultiSessionResults(result: SearchResponse): void {
             query: result.query,
             rank,
             filterQuery: shownFilterQuery,
+            searchId: result.searchId,
           };
           const hash = `#session/${encodeURIComponent(hits.sessionId)}/uuid/${encodeURIComponent(uuid)}`;
           // 주소가 그대로면 hashchange가 오지 않으므로 이동을 직접 다시 실행한다
@@ -981,10 +992,55 @@ function renderMultiSessionResults(result: SearchResponse): void {
           }
         });
       }
-      box.append(el);
+      // 매치 줄이 버튼이라 그 안에 버튼을 넣을 수 없다. 옆에 둔다
+      const row = document.createElement("div");
+      row.className = "search-match-row";
+      row.append(el);
+      if (uuid !== null) {
+        row.append(
+          feedbackButton("이게 답", "답으로 기록함", {
+            searchId: result.searchId,
+            kind: "answer",
+            sessionId: hits.sessionId,
+            uuid,
+          }),
+        );
+      }
+      box.append(row);
     }
     searchResultsEl.append(box);
   }
+}
+
+/**
+ * "이게 답"·"못 찾았다" 버튼. 누르면 한 번 기록하고 눌린 채로 둔다. 기록하지
+ * 못해도 결과를 쓰는 데는 지장이 없고, 사유를 보이고 다시 누를 수 있다 (Spec "화면").
+ */
+function feedbackButton(
+  label: string,
+  doneLabel: string,
+  params: Record<string, string>,
+): HTMLButtonElement {
+  const button = Object.assign(document.createElement("button"), {
+    type: "button",
+    className: "feedback-btn",
+    textContent: label,
+  });
+  button.addEventListener("click", () => {
+    button.disabled = true;
+    getJson<unknown>(
+      `/api/search/feedback?${new URLSearchParams(params).toString()}`,
+    ).then(
+      () => {
+        button.textContent = doneLabel;
+      },
+      (err: unknown) => {
+        button.disabled = false;
+        button.textContent = `기록하지 못했습니다: ${(err as Error).message}`;
+      },
+    );
+  });
+  return button;
 }
 
 /** 전 세션 결과에서 누른 레코드의 조각을 찾아 펼친다. 조각에 속하지 않으면 알린다. */
@@ -993,7 +1049,7 @@ async function revealRecord(sessionId: string, uuid: string): Promise<void> {
   pendingOpen = null;
   let from = "";
   if (open && open.sessionId === sessionId && open.uuid === uuid) {
-    from = `&q=${encodeURIComponent(open.query)}&rank=${open.rank}${open.filterQuery}`;
+    from = `&q=${encodeURIComponent(open.query)}&rank=${open.rank}${open.filterQuery}&searchId=${encodeURIComponent(open.searchId)}`;
   }
   try {
     const attribution = await getJson<MatchAttribution>(

@@ -482,6 +482,8 @@ export interface RelaxedResponse {
 /** `/api/search` */
 export interface SearchResponse {
   readonly query: string;
+  /** 이 검색의 식별자. 화면이 `open`·`answer`·`notfound` 기록을 이 검색에 잇는 데 쓴다 */
+  readonly searchId: string;
   readonly index: IndexStatus;
   readonly sessions: readonly SessionHits[];
   /** 매치가 있는 세션이 50개를 넘어 잘렸으면 true */

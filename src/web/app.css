@@ -680,6 +680,45 @@ button.copy {
   border-color: var(--cut);
 }
 
+/* 전 세션 결과의 매치 한 줄 — 매치 버튼 옆에 "이게 답" 버튼을 둔다 */
+.search-match-row {
+  display: flex;
+  gap: var(--space-2);
+  align-items: stretch;
+}
+
+.search-match-row .search-match {
+  flex: 1;
+  width: auto;
+  min-width: 0;
+}
+
+.search-feedback {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.feedback-btn {
+  flex: none;
+  align-self: flex-start;
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel);
+  color: var(--muted);
+  font: inherit;
+  font-size: var(--font-meta);
+  cursor: pointer;
+}
+
+.feedback-btn:hover:not(:disabled) {
+  border-color: var(--muted);
+}
+
+.feedback-btn:disabled {
+  cursor: default;
+}
+
 .search-excerpt {
   font-family: ui-monospace, SFMono-Regular, monospace;
   font-size: var(--font-meta);
