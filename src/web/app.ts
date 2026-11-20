@@ -33,6 +33,7 @@ import {
   sessionSubline,
   matchesQuery,
 } from "./format.js";
+import { NOTFOUND_REASONS } from "../core/notfound-reasons.js";
 import { renderFormatted } from "./formatted-text.js";
 import {
   describeExcluded,
@@ -950,12 +951,39 @@ function renderMultiSessionResults(result: SearchResponse): void {
   }
   const notFound = document.createElement("div");
   notFound.className = "search-feedback";
+  const reasons = document.createElement("div");
+  reasons.className = "search-reasons";
+  reasons.hidden = true;
   notFound.append(
-    feedbackButton("못 찾았다", "기록했습니다", {
-      searchId: result.searchId,
-      kind: "notfound",
+    feedbackButton(
+      "못 찾았다",
+      "기록했습니다",
+      { searchId: result.searchId, kind: "notfound" },
+      () => {
+        reasons.hidden = false;
+      },
+    ),
+    reasons,
+  );
+  reasons.append(
+    Object.assign(document.createElement("span"), {
+      className: "muted",
+      textContent: "이유가 있다면 (선택):",
     }),
   );
+  const reasonButtons: HTMLButtonElement[] = [];
+  for (const { code, label } of NOTFOUND_REASONS) {
+    const button = feedbackButton(
+      label,
+      `${label} ✓`,
+      { searchId: result.searchId, kind: "reason", reason: code },
+      () => {
+        for (const other of reasonButtons) other.disabled = true;
+      },
+    );
+    reasonButtons.push(button);
+    reasons.append(button);
+  }
   searchResultsEl.append(notFound);
   for (const [i, hits] of result.sessions.entries()) {
     const rank = i + 1;
@@ -1020,6 +1048,7 @@ function feedbackButton(
   label: string,
   doneLabel: string,
   params: Record<string, string>,
+  onRecorded?: () => void,
 ): HTMLButtonElement {
   const button = Object.assign(document.createElement("button"), {
     type: "button",
@@ -1033,6 +1062,7 @@ function feedbackButton(
     ).then(
       () => {
         button.textContent = doneLabel;
+        onRecorded?.();
       },
       (err: unknown) => {
         button.disabled = false;
