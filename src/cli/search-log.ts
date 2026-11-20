@@ -1,6 +1,7 @@
 import { appendFileSync, chmodSync, mkdirSync } from "node:fs";
 import path from "node:path";
 
+import type { NotfoundReason } from "../core/notfound-reasons.js";
 import type { SearchFilters } from "../core/types.js";
 
 /**
@@ -63,6 +64,15 @@ export type SearchLogEvent =
       readonly query: string;
       readonly filters: SearchFilters;
       readonly matchCount: number;
+    }
+  | {
+      /** "못 찾았다" 뒤에 고른 이유. 사용자의 자기 판단이다 */
+      readonly kind: "notfound-reason";
+      readonly at: string;
+      readonly searchId: string;
+      readonly query: string;
+      readonly filters: SearchFilters;
+      readonly reason: NotfoundReason;
     };
 
 type WithoutAt<T> = T extends unknown ? Omit<T, "at"> : never;
