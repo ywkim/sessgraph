@@ -28,8 +28,8 @@ import type {
   SessionSummary,
 } from "../core/types.js";
 import { SearchIndexClient, SearchIndexError } from "./search-index/client.js";
-import { FileSearchLog } from "./search-log.js";
-import type { SearchLog } from "./search-log.js";
+import { FileSearchLog, isSearchSource } from "./search-log.js";
+import type { SearchLog, SearchSource } from "./search-log.js";
 import type { IndexProgress, WorkerMatch } from "./search-index/protocol.js";
 
 /** Spec "Interface" — 지정 포트가 사용 중이어도 다른 포트를 고르지 않는다. */
@@ -274,6 +274,7 @@ export const ISSUED_SEARCH_LIMIT = 100;
 
 /** 화면에 내보낸 전 세션 검색 하나. 기록이 화면과 같은 목록을 가리키게 한다 */
 interface IssuedSearch {
+  readonly source?: SearchSource;
   readonly query: string;
   readonly filters: SearchFilters;
   readonly matchCount: number;
@@ -323,6 +324,8 @@ export function createRequestHandler(
       if (q === null) return;
       const filters = validFilters(url, res);
       if (filters === null) return;
+      const source = validSource(url, res);
+      if (source === null) return;
       // 귀속하지 않는다 — 세션 인덱스를 만들면 메인 스레드가 멈춘다 (Spec "귀속")
       void respondSearch(res, search, async (client) => {
         const start = performance.now();
@@ -347,6 +350,7 @@ export function createRequestHandler(
         const matchCount = sessions.reduce((n, s) => n + s.matchCount, 0);
         if (searchLog !== null) {
           issued.set(searchId, {
+            ...source,
             query: q,
             filters,
             matchCount,
@@ -360,6 +364,7 @@ export function createRequestHandler(
           }
         }
         searchLog?.record({
+          ...source,
           kind: "search",
           query: q,
           filters,
@@ -423,6 +428,8 @@ export function createRequestHandler(
       if (q === null) return;
       const filters = validFilters(url, res);
       if (filters === null) return;
+      const source = validSource(url, res);
+      if (source === null) return;
       void respondSearch(res, search, async (client) => {
         const start = performance.now();
         const r = await client.searchOne(q, entry.filePath, filters);
@@ -438,6 +445,7 @@ export function createRequestHandler(
           durationMs: performance.now() - start,
         };
         searchLog?.record({
+          ...source,
           kind: "search",
           query: q,
           filters,
@@ -482,7 +490,10 @@ export function createRequestHandler(
       if (fromQuery && Number.isInteger(rank) && rank > 0 && parsed.ok) {
         // 서버가 발급한 형식이 아닌 값은 버린다. 로그에 임의의 문자열을 남기지 않는다
         const searchId = url.searchParams.get("searchId") ?? "";
+        const source = validSource(url, res);
+        if (source === null) return;
         searchLog?.record({
+          ...source,
           kind: "open",
           query: fromQuery,
           filters: parsed.filters,
@@ -572,6 +583,27 @@ function filterParams(url: URL): {
 }
 
 /** Spec "검색 조건" — 무효면 400을 보내고 null. */
+/**
+ * `source`는 LLM이 API로 부를 때만 싣는다. 값이 없으면 `{}`(사람), `llm`이면
+ * `{source: "llm"}`, 그 밖의 값이면 400을 답하고 null이다.
+ */
+function validSource(
+  url: URL,
+  res: ServerResponse,
+): { source?: SearchSource } | null {
+  const raw = url.searchParams.get("source");
+  if (raw === null) return {};
+  if (!isSearchSource(raw)) {
+    sendJson(res, 400, { error: "source는 llm만 받습니다" });
+    return null;
+  }
+  return { source: raw };
+}
+
+function sourceOf(found: IssuedSearch): { source?: SearchSource } {
+  return found.source === undefined ? {} : { source: found.source };
+}
+
 function validFilters(url: URL, res: ServerResponse): SearchFilters | null {
   const parsed = parseSearchFilters(filterParams(url));
   if (!parsed.ok) {
@@ -621,6 +653,7 @@ function recordFeedback(
       return;
     }
     searchLog.record({
+      ...sourceOf(found),
       kind: "notfound-reason",
       searchId,
       query: found.query,
@@ -632,6 +665,7 @@ function recordFeedback(
   }
   if (kind === "notfound") {
     searchLog.record({
+      ...sourceOf(found),
       kind,
       searchId,
       query: found.query,
@@ -651,6 +685,7 @@ function recordFeedback(
     return;
   }
   searchLog.record({
+    ...sourceOf(found),
     kind,
     searchId,
     query: found.query,

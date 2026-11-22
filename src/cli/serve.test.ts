@@ -705,6 +705,67 @@ test("serve: reason은 목록에 있는 이유만 그 검색에 이어 남긴다
   );
 });
 
+test("serve: source=llm은 검색·열기·표시 기록에 실리고 다른 값은 400이다", async () => {
+  const file = sessionFile("s.jsonl", convLine(U(1), null, "needle"));
+  const events: Record<string, unknown>[] = [];
+  const log: SearchLog = {
+    record: (e) => void events.push(e),
+  };
+  await withSearchServer(
+    [file],
+    async (base) => {
+      // 도우미의 색인 대기 검색이 남긴 줄을 비운다
+      events.length = 0;
+      const status = async (path: string) => (await fetch(base + path)).status;
+      assert.equal(await status("/api/search?q=needle&source=human"), 400);
+      assert.equal(await status("/api/search?q=needle&source="), 400);
+      assert.equal(events.length, 0);
+
+      const human = (await (
+        await fetch(`${base}/api/search?q=needle`)
+      ).json()) as SearchResponse;
+      assert.equal("source" in events[0]!, false);
+
+      events.length = 0;
+      const llm = (await (
+        await fetch(`${base}/api/search?q=needle&source=llm`)
+      ).json()) as SearchResponse;
+      const id = llm.sessions[0]!.sessionId;
+      const uuid = llm.sessions[0]!.matches[0]!.uuid;
+      await fetch(`${base}/api/session/${id}/search?q=needle&source=llm`);
+      assert.equal(
+        await status(
+          `/api/session/${id}/attribution?uuid=${uuid}&q=needle&rank=1&searchId=${llm.searchId}&source=llm`,
+        ),
+        200,
+      );
+      assert.equal(
+        await status(
+          `/api/search/feedback?searchId=${llm.searchId}&kind=notfound`,
+        ),
+        200,
+      );
+      assert.deepEqual(
+        events.map((e) => [e.kind, e.source]),
+        [
+          ["search", "llm"],
+          ["search", "llm"],
+          ["open", "llm"],
+          ["notfound", "llm"],
+        ],
+      );
+
+      events.length = 0;
+      await fetch(
+        `${base}/api/search/feedback?searchId=${human.searchId}&kind=notfound`,
+      );
+      assert.equal("source" in events[0]!, false);
+    },
+    undefined,
+    log,
+  );
+});
+
 test("serve: 검색 기록이 꺼져 있으면 기록 요청은 503이다", async () => {
   const file = sessionFile("s.jsonl", convLine(U(1), null, "needle"));
   await withSearchServer([file], async (base) => {

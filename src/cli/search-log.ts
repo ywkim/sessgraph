@@ -4,13 +4,23 @@ import path from "node:path";
 import type { NotfoundReason } from "../core/notfound-reasons.js";
 import type { SearchFilters } from "../core/types.js";
 
+/** 검색을 부른 쪽. 필드가 없으면 사람이 화면에서 한 검색이다 */
+export type SearchSource = "llm";
+
+export function isSearchSource(value: string): value is SearchSource {
+  return value === "llm";
+}
+
 /**
  * 검색 기록 — 검색어와 결과에서 누른 세션을 남겨 검색 품질 평가에 쓴다
  * (docs/spec/20261015-1821-search-index.spec.md "검색 기록").
  *
  * 실제 세션 내용이 담기므로 캐시 디렉터리에 소유자만 읽는 파일로 둔다.
+ *
+ * 모든 줄은 선택 필드 `source`를 가질 수 있다. LLM이 API로 부른 검색과 그 뒤의
+ * 줄이 사람의 answer·notfound·재검색 신호와 섞이지 않게 가르는 용도다.
  */
-export type SearchLogEvent =
+export type SearchLogEvent = (
   | {
       readonly kind: "search";
       readonly at: string;
@@ -73,7 +83,8 @@ export type SearchLogEvent =
       readonly query: string;
       readonly filters: SearchFilters;
       readonly reason: NotfoundReason;
-    };
+    }
+) & { readonly source?: SearchSource };
 
 type WithoutAt<T> = T extends unknown ? Omit<T, "at"> : never;
 
