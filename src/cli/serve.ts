@@ -11,6 +11,7 @@ import { parseArgs } from "node:util";
 import { readSessionMeta } from "../core/session-meta.js";
 import type { SessionMeta } from "../core/session-meta.js";
 import { buildIndexDetailed } from "../core/build-index.js";
+import { isNotfoundReason } from "../core/notfound-reasons.js";
 import { attributeOne } from "../core/search.js";
 import { parseSearchFilters } from "../core/search-filters.js";
 import { buildSegmentDetail, isCollapsedByDefault } from "../core/serve.js";
@@ -581,7 +582,7 @@ function validFilters(url: URL, res: ServerResponse): SearchFilters | null {
 }
 
 /**
- * `answer`·`notfound` 기록 (Spec "검색 기록"). 화면은 `searchId`와 `uuid`만
+ * `answer`·`notfound`·`reason` 기록 (Spec "검색 기록"). 화면은 `searchId`와 `uuid`만
  * 보낸다. 순위·위치·표시 목록은 서버가 그 검색에 내보낸 목록에서 채우므로
  * 화면이 보낸 값을 믿지 않고, 발급하지 않은 id나 그 결과에 없는 매치는 남기지 않는다.
  */
@@ -596,8 +597,10 @@ function recordFeedback(
     return;
   }
   const kind = url.searchParams.get("kind");
-  if (kind !== "answer" && kind !== "notfound") {
-    sendJson(res, 400, { error: "kind는 answer나 notfound여야 합니다" });
+  if (kind !== "answer" && kind !== "notfound" && kind !== "reason") {
+    sendJson(res, 400, {
+      error: "kind는 answer, notfound, reason 중 하나여야 합니다",
+    });
     return;
   }
   const searchId = url.searchParams.get("searchId") ?? "";
@@ -609,6 +612,22 @@ function recordFeedback(
       error:
         "찾을 수 없는 검색입니다 (서버가 다시 시작했거나 오래된 검색입니다)",
     });
+    return;
+  }
+  if (kind === "reason") {
+    const reason = url.searchParams.get("reason") ?? "";
+    if (!isNotfoundReason(reason)) {
+      sendJson(res, 400, { error: "알 수 없는 reason입니다" });
+      return;
+    }
+    searchLog.record({
+      kind: "notfound-reason",
+      searchId,
+      query: found.query,
+      filters: found.filters,
+      reason,
+    });
+    sendJson(res, 200, { recorded: true });
     return;
   }
   if (kind === "notfound") {

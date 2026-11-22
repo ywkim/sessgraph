@@ -695,7 +695,8 @@ button.copy {
 
 .search-feedback {
   display: flex;
-  justify-content: flex-end;
+  flex-direction: column;
+  align-items: flex-end;
 }
 
 .feedback-btn {
@@ -713,6 +714,19 @@ button.copy {
 
 .feedback-btn:hover:not(:disabled) {
   border-color: var(--muted);
+}
+
+.search-reasons[hidden] {
+  display: none;
+}
+
+.search-reasons {
+  display: flex;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1);
+  margin-top: var(--space-1);
 }
 
 .feedback-btn:disabled {

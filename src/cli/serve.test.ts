@@ -658,6 +658,53 @@ test("serve: 발급하지 않은 검색, 그 결과에 없는 매치, 잘못된 
   );
 });
 
+test("serve: reason은 목록에 있는 이유만 그 검색에 이어 남긴다", async () => {
+  const file = sessionFile("s.jsonl", convLine(U(1), null, "needle"));
+  const events: unknown[] = [];
+  const log: SearchLog = { record: (e) => void events.push(e) };
+  await withSearchServer(
+    [file],
+    async (base) => {
+      const all = (await (
+        await fetch(`${base}/api/search?q=needle`)
+      ).json()) as SearchResponse;
+      events.length = 0;
+      const id = all.searchId;
+      const statusOf = async (params: string) =>
+        (await fetch(`${base}/api/search/feedback?${params}`)).status;
+
+      assert.equal(await statusOf(`searchId=${id}&kind=reason`), 400);
+      assert.equal(
+        await statusOf(`searchId=${id}&kind=reason&reason=nope`),
+        400,
+      );
+      assert.equal(
+        await statusOf(
+          "searchId=0123456789abcdef&kind=reason&reason=wrong-term",
+        ),
+        404,
+      );
+      assert.deepEqual(events, []);
+
+      assert.equal(
+        await statusOf(`searchId=${id}&kind=reason&reason=wrong-term`),
+        200,
+      );
+      assert.deepEqual(events, [
+        {
+          kind: "notfound-reason",
+          searchId: id,
+          query: "needle",
+          filters: { since: null, until: null, tiers: null },
+          reason: "wrong-term",
+        },
+      ]);
+    },
+    undefined,
+    log,
+  );
+});
+
 test("serve: 검색 기록이 꺼져 있으면 기록 요청은 503이다", async () => {
   const file = sessionFile("s.jsonl", convLine(U(1), null, "needle"));
   await withSearchServer([file], async (base) => {
