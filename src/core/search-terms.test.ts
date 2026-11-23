@@ -60,6 +60,10 @@ describe("highlightSegments", () => {
     assert.deepEqual(hits("abcabc", "bc"), ["bc", "bc"]);
   });
 
+  it("같은 낱말끼리 겹쳐 나와도 모두 찾아 하나로 합친다", () => {
+    assert.deepEqual(hits("ababa", "aba"), ["ababa"]);
+  });
+
   it("겹치거나 맞닿은 일치는 하나로 합친다", () => {
     assert.deepEqual(hits("abcde", "abc cde"), ["abcde"]);
     assert.deepEqual(hits("abcd", "ab cd"), ["abcd"]);

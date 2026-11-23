@@ -41,7 +41,7 @@ export function highlightSegments(
     for (
       let i = lowered.indexOf(needle);
       i !== -1;
-      i = lowered.indexOf(needle, i + needle.length)
+      i = lowered.indexOf(needle, i + 1)
     ) {
       ranges.push([i, i + needle.length]);
     }
