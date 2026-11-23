@@ -24,6 +24,7 @@ import type {
   SessionSummary,
 } from "../core/types.js";
 import { computeBranchLanes } from "../core/segment-branch.js";
+import { highlightSegments } from "../core/search-terms.js";
 import { isCollapsedByDefault } from "../core/serve.js";
 import {
   summarizeRaw,
@@ -850,7 +851,7 @@ async function runSearch(query: string, input: FilterInput): Promise<void> {
       excludedMatchCount = result.excludedMatchCount;
       searchResultsEl.innerHTML = "";
       searchResultsEl.append(...indexNotes(result.index));
-      const box = renderMatches(result.matches);
+      const box = renderMatches(result.matches, result.query);
       if (result.matchCount > result.matches.length) {
         box.prepend(countNote(result.matchCount, result.matches.length));
       }
@@ -1000,7 +1001,7 @@ function renderMultiSessionResults(result: SearchResponse): void {
     // 귀속은 누를 때 한다 — uuid가 있으면 누를 수 있다 (Spec "귀속")
     for (const hit of hits.matches) {
       const uuid = hit.uuid;
-      const el = renderMatchLine(hit, uuid !== null);
+      const el = renderMatchLine(hit, uuid !== null, result.query);
       if (uuid !== null) {
         el.addEventListener("click", () => {
           pendingOpen = {
@@ -1106,7 +1107,10 @@ function countNote(total: number, shown: number): HTMLElement {
  * 세션 하나 결과. 조각으로 이동할 수 있는 매치와 없는 매치를 나눠 보여준다
  * (Spec "화면"). 이 세션은 이미 열려 있으므로 누르면 그 자리에서 펼친다.
  */
-function renderMatches(matches: readonly SearchMatch[]): HTMLElement {
+function renderMatches(
+  matches: readonly SearchMatch[],
+  query: string,
+): HTMLElement {
   const box = document.createElement("div");
   box.className = "search-result";
 
@@ -1114,7 +1118,7 @@ function renderMatches(matches: readonly SearchMatch[]): HTMLElement {
   const rest = matches.filter((m) => m.attribution.kind !== "segment");
 
   for (const match of clickable) {
-    const el = renderMatchLine(match, true);
+    const el = renderMatchLine(match, true, query);
     if (match.attribution.kind === "segment") {
       const rootUuid = match.attribution.segmentRootUuid;
       const uuid = match.attribution.uuid;
@@ -1132,7 +1136,8 @@ function renderMatches(matches: readonly SearchMatch[]): HTMLElement {
         textContent: `조각으로 이동할 수 없는 매치 ${rest.length}건 — 인덱스가 배제했거나 구조를 판단하지 못한 레코드입니다`,
       }),
     );
-    for (const match of rest) restBox.append(renderMatchLine(match, false));
+    for (const match of rest)
+      restBox.append(renderMatchLine(match, false, query));
     box.append(restBox);
   }
 
@@ -1197,12 +1202,34 @@ const TIER_LABEL: Record<SearchMatch["tier"], string> = {
   meta: "기타",
 };
 
-/** 매치 한 줄. 누를 때의 동작은 호출하는 쪽이 붙인다. */
-function renderMatchLine(hit: SearchHit, clickable: boolean): HTMLElement {
+/**
+ * 매치 한 줄. 누를 때의 동작은 호출하는 쪽이 붙인다. 발췌 안에서 검색어의
+ * 낱말과 일치하는 부분은 `<mark>`로 감싼다(Spec "화면").
+ */
+function renderMatchLine(
+  hit: SearchHit,
+  clickable: boolean,
+  query: string,
+): HTMLElement {
   const el = document.createElement(clickable ? "button" : "div");
   el.className = clickable ? "search-match" : "search-match unindexed";
   if (el instanceof HTMLButtonElement) el.type = "button";
-  el.innerHTML = `<span class="search-tier tier-${escapeHtml(hit.tier)}">${TIER_LABEL[hit.tier]}</span> <span class="search-excerpt">${escapeHtml(hit.excerpt)}</span>`;
+  const tier = Object.assign(document.createElement("span"), {
+    className: `search-tier tier-${hit.tier}`,
+    textContent: TIER_LABEL[hit.tier],
+  });
+  const excerpt = document.createElement("span");
+  excerpt.className = "search-excerpt";
+  for (const { text, hit: matched } of highlightSegments(hit.excerpt, query)) {
+    if (matched) {
+      excerpt.append(
+        Object.assign(document.createElement("mark"), { textContent: text }),
+      );
+    } else {
+      excerpt.append(text);
+    }
+  }
+  el.append(tier, " ", excerpt);
   return el;
 }
 

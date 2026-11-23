@@ -740,6 +740,12 @@ button.copy {
   word-break: break-word;
 }
 
+.search-excerpt mark {
+  background: #ffe58f;
+  color: inherit;
+  border-radius: 2px;
+}
+
 .search-heading {
   color: var(--muted);
 }

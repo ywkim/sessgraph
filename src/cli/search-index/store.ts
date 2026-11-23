@@ -17,6 +17,7 @@ import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
 import { NO_FILTERS } from "../../core/search-filters.js";
+import { searchTerms } from "../../core/search-terms.js";
 import { extractSearchRows, type SearchTier } from "../../core/search-text.js";
 import type { RelaxedSearch, SearchFilters } from "../../core/types.js";
 import { bigramQuery, bigramTokens } from "./bigram.js";
@@ -562,18 +563,6 @@ function codePointLength(s: string): number {
   let n = 0;
   for (const _ of s) n++;
   return n;
-}
-
-/**
- * Spec "검색어의 낱말" — 공백으로 나눈 낱말(중복 제거). 검색어 전체가 큰따옴표로
- * 감싸여 있으면 안쪽을 낱말 하나로 보고, 공백뿐인 검색어는 그대로 낱말 하나다.
- */
-export function searchTerms(query: string): string[] {
-  if (query.length > 2 && query.startsWith('"') && query.endsWith('"')) {
-    return [query.slice(1, -1)];
-  }
-  const terms = [...new Set(query.split(/\s+/).filter((t) => t !== ""))];
-  return terms.length > 0 ? terms : [query];
 }
 
 /** Spec "발췌" — 본문에서 가장 먼저 나오는 낱말 앞뒤 120 코드 포인트, 잘린 쪽에 `…`. */
