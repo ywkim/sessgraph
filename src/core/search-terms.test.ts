@@ -24,6 +24,16 @@ describe("searchTerms", () => {
     assert.deepEqual(searchTerms('"이게 답"'), ["이게 답"]);
   });
 
+  it("둥근 큰따옴표로 감싸도 구절이다 (복사해 붙이면 둥글게 들어온다)", () => {
+    assert.deepEqual(searchTerms("“Context rot”"), ["Context rot"]);
+    assert.deepEqual(searchTerms('“이게 답"'), ["이게 답"]);
+  });
+
+  it("따옴표가 한쪽뿐이거나 일부만 감싸면 낱말로 나눈다", () => {
+    assert.deepEqual(searchTerms("“Context rot"), ["“Context", "rot"]);
+    assert.deepEqual(searchTerms("PR “노드 링크”"), ["PR", "“노드", "링크”"]);
+  });
+
   it("공백뿐인 검색어는 그대로 낱말 하나다", () => {
     assert.deepEqual(searchTerms("  "), ["  "]);
   });

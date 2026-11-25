@@ -179,7 +179,7 @@ A: 아니다. PRD의 Why는 목표, Design의 Context는 그 PRD의 목표를 �
 
 **Q: 이미 작성한 문서를 수정할 때는?**
 
-A: ADR은 수정 금지 (`Superseded by`로만 가능). PRD/Design/Spec은 `updated:` 필드를 갱신하고 수정한다. 전제가 무효화됐으면 `status: Superseded by {ID}`로 마킹하고 본문은 두다.
+A: ADR은 수정 금지 (`Superseded by`로만 가능). PRD/Design/Spec은 `updated:` 필드를 갱신하고 수정한다. PR에서 바뀐 문서의 `updated:`가 그 변경의 작성일(author date)보다 이르면 `npm run lint:docs:updated`가 CI에서 막는다. 전제가 무효화됐으면 `status: Superseded by {ID}`로 마킹하고 본문은 두다.
 
 **Q: 작은 버그 수정도 문서를 써야 하나?**
 

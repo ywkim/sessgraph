@@ -67,11 +67,35 @@ interface Hit {
   readonly rowid: number;
 }
 
+export interface SearchStoreOptions {
+  /** 세션 하나 검색이 쓰는 경로 열 인덱스를 만들고 쓴다. 기본 true. 시험이 FTS 경로와 비교하려고 끈다 */
+  readonly pathIndex?: boolean;
+}
+
 export class SearchStore {
   readonly #db: DatabaseSync;
+  /** `rows_content(c0)` 인덱스가 있어 세션 하나 검색이 그 세션의 행만 훑는다 */
+  #pathIndexed = false;
 
-  private constructor(db: DatabaseSync) {
+  private constructor(db: DatabaseSync, pathIndex: boolean) {
     this.#db = db;
+    if (pathIndex) this.#ensurePathIndex();
+  }
+
+  /**
+   * FTS5 내용 테이블의 경로 열(`c0`)에 인덱스를 건다. 열 순서는 `rows` 선언 순서
+   * (path, tier, uuid, ts, body = c0..c4)다. 인덱스를 만들지 못하면(다른 프로세스가
+   * 쓰는 중 등) 쓰지 않고 FTS 경로로 찾는다 — 색인을 지우지 않는다.
+   */
+  #ensurePathIndex(): void {
+    try {
+      this.#db.exec(
+        "CREATE INDEX IF NOT EXISTS rows_content_path ON rows_content(c0)",
+      );
+      this.#pathIndexed = true;
+    } catch {
+      this.#pathIndexed = false;
+    }
   }
 
   /**
@@ -79,17 +103,21 @@ export class SearchStore {
    * 못하면 지우고 새로 만든다 — 색인은 캐시다 (Spec "기동과 첫 생성").
    * 캐시 디렉터리를 만들 수 없으면 throw한다.
    */
-  static open(cacheDir: string): SearchStore {
+  static open(cacheDir: string, options: SearchStoreOptions = {}): SearchStore {
     mkdirSync(cacheDir, { recursive: true, mode: 0o700 });
     const file = path.join(cacheDir, FILE_NAME);
+    const pathIndex = options.pathIndex ?? true;
+    let db: DatabaseSync;
     try {
-      return new SearchStore(openValid(file));
+      db = openValid(file);
     } catch {
       for (const suffix of ["", "-wal", "-shm"]) {
         rmSync(file + suffix, { force: true });
       }
-      return new SearchStore(openValid(file));
+      db = openValid(file);
     }
+    // 인덱스 생성은 파일을 지우고 다시 만드는 경로 밖에서 한다
+    return new SearchStore(db, pathIndex);
   }
 
   close(): void {
@@ -223,7 +251,6 @@ export class SearchStore {
   ): {
     readonly sessions: PathHits[];
     readonly truncatedSessions: boolean;
-    readonly excludedMatchCount: number;
   } {
     const byPath = new Map<string, Hit[]>();
     for (const hit of this.#match(query, null, filters)) {
@@ -251,8 +278,19 @@ export class SearchStore {
     return {
       sessions,
       truncatedSessions: groups.length > SESSIONS_LIMIT,
-      excludedMatchCount: this.#excludedCount(query, null, filters, paths),
     };
+  }
+
+  /**
+   * 전 세션 검색에서 종류 조건 때문에 빠진 매치의 수 (Spec "제외된 종류의 건수").
+   * 흔한 낱말이면 본 검색보다 오래 걸려 검색 응답과 따로 부른다.
+   */
+  excludedAll(
+    query: string,
+    paths: ReadonlySet<string>,
+    filters: SearchFilters = NO_FILTERS,
+  ): number {
+    return this.#excludedCount(query, null, filters, paths);
   }
 
   /**
@@ -314,6 +352,20 @@ export class SearchStore {
     if (filters.tiers === null) return 0;
     const excluded = TIERS.filter((t) => !filters.tiers!.includes(t));
     if (excluded.length === 0) return 0;
+    if (onlyPath !== null) {
+      const direct = this.#directOne(query, onlyPath, {
+        ...filters,
+        tiers: excluded,
+      });
+      if (direct !== null) {
+        const row = this.#db
+          .prepare(
+            `SELECT COUNT(*) AS n FROM rows_content WHERE ${direct.where}`,
+          )
+          .get(...direct.params) as { n: number };
+        return row.n;
+      }
+    }
     const { fromWhere, params } = this.#fromWhere(query, onlyPath, {
       ...filters,
       tiers: excluded,
@@ -337,12 +389,31 @@ export class SearchStore {
     onlyPath: string | null,
     filters: SearchFilters,
   ): Hit[] {
+    if (onlyPath !== null) {
+      const direct = this.#directOne(query, onlyPath, filters);
+      if (direct !== null) {
+        return this.#db
+          .prepare(
+            `SELECT c0 AS path, c1 AS tier, c3 AS ts, id AS rowid FROM rows_content WHERE ${direct.where}`,
+          )
+          .all(...direct.params) as unknown as Hit[];
+      }
+    }
     const { fromWhere, params } = this.#fromWhere(query, onlyPath, filters);
     return this.#db
       .prepare(
         `SELECT rows.path AS path, rows.tier AS tier, rows.ts AS ts, rows.rowid AS rowid FROM ${fromWhere}`,
       )
       .all(...params) as unknown as Hit[];
+  }
+
+  /** 경로 인덱스가 있고 낱말이 `LIKE`로 같은 결과를 낼 때만 직접 질의 조건을 돌려준다. */
+  #directOne(
+    query: string,
+    filePath: string,
+    filters: SearchFilters,
+  ): { where: string; params: (string | number)[] } | null {
+    return this.#pathIndexed ? directOneWhere(query, filePath, filters) : null;
   }
 
   /**
@@ -557,6 +628,57 @@ function compareTsDesc(a: string | null, b: string | null): number {
   if (a === null) return 1;
   if (b === null) return -1;
   return a < b ? 1 : -1;
+}
+
+/**
+ * 세션 하나 검색의 조건(`rows_content` 열 이름). FTS의 `path` 열은 인덱스가 없어 한 세션을
+ * 찾아도 매치가 있는 모든 행의 경로를 읽는다. 내용 테이블의 경로 인덱스(`c0`)로 그 세션의
+ * 행만 고르고 낱말마다 `LIKE`로 거른다. `LIKE`는 ASCII만 대소문자를 접으므로 대소문자가 있는
+ * 비ASCII 글자가 든 낱말이면 null이라 FTS 경로로 찾는다.
+ *
+ * `c0` 말고 인덱스를 탈 수 있는 열(`c1`·`c3`)에는 단항 `+`를 붙여 인덱스 후보에서 뺀다.
+ * 지금 계획을 바꾸는 것은 `+c1`이다. 통계가 없는 플래너는 `c3` 범위보다 `c0` 등호를 먼저
+ * 고르므로 `+c3`는 통계(`ANALYZE`)가 생길 때를 대비한 것이다.
+ * `rows_content`에 인덱스가 더 있으면 플래너가 그쪽을 골라 같은 질의가 수십 배 느려진 적이
+ * 있다(종류 인덱스를 고르면 0.09초가 5.8초). `INDEXED BY`는 쓰지 않는다 — 인덱스가 없으면
+ * 오류가 나는 마지막 수단이고, 단항 `+`는 인덱스가 없어도 질의가 돈다.
+ */
+export function directOneWhere(
+  query: string,
+  filePath: string,
+  filters: SearchFilters,
+): { where: string; params: (string | number)[] } | null {
+  const terms = searchTerms(query);
+  if (terms.some(hasCasedNonAscii)) return null;
+  const where = ["c0 = ?"];
+  const params: (string | number)[] = [filePath];
+  for (const term of terms) {
+    where.push("c4 LIKE ? ESCAPE '\\'");
+    params.push(`%${term.replace(/[\\%_]/g, (c) => `\\${c}`)}%`);
+  }
+  if (filters.since !== null) {
+    where.push("+c3 >= ?");
+    params.push(filters.since);
+  }
+  if (filters.until !== null) {
+    where.push("+c3 < ?");
+    params.push(filters.until);
+  }
+  if (filters.tiers !== null) {
+    where.push(`+c1 IN (${filters.tiers.map(() => "?").join(", ")})`);
+    params.push(...filters.tiers.map((t) => TIERS.indexOf(t)));
+  }
+  return { where: where.join(" AND "), params };
+}
+
+/** ASCII가 아니면서 대소문자가 있는 글자가 든 문자열. 한글·한자·숫자는 해당하지 않는다. */
+function hasCasedNonAscii(term: string): boolean {
+  for (const ch of term) {
+    if (ch.charCodeAt(0) > 0x7f && ch.toLowerCase() !== ch.toUpperCase()) {
+      return true;
+    }
+  }
+  return false;
 }
 
 function codePointLength(s: string): number {

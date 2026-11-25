@@ -18,6 +18,7 @@ import type {
   MatchAttribution,
   SearchHit,
   SearchMatch,
+  ExcludedResponse,
   RelaxedResponse,
   SearchResponse,
   SessionSearchResponse,
@@ -40,6 +41,7 @@ import {
   describeExcluded,
   describeFilters,
   excludedTiers,
+  excludedTierNames,
   filterQuery,
   type FilterInput,
 } from "./search-filters.js";
@@ -287,7 +289,7 @@ function renderSessionList(sessions: readonly SessionSummary[]): void {
   revealedUuid = null;
   discardPendingSearch();
   searchResultsEl.innerHTML = "";
-  summaryEl.textContent = `세션 ${sessions.length}개`;
+  summaryEl.textContent = `세션 ${sessions.length}개 (기동 시점 기준)`;
   bannerEl.hidden = true;
   clearWarnings();
   timelineEl.innerHTML = "";
@@ -880,10 +882,13 @@ async function runSearch(query: string, input: FilterInput): Promise<void> {
         `/api/search?q=${encodeURIComponent(query)}${conditions}`,
       );
       if (seq !== searchSeq) return;
-      excludedMatchCount = result.excludedMatchCount;
       renderMultiSessionResults(result);
       if (result.sessions.length === 0) {
         void showRelaxed(query, conditions, seq);
+      }
+      // 빠진 종류의 건수는 흔한 낱말이면 본 검색보다 오래 걸려 따로 받는다
+      if (describeExcluded(input, 1) !== "") {
+        void showExcluded(query, conditions, input, seq);
       }
     }
     shownFilterQuery = conditions;
@@ -906,6 +911,37 @@ async function runSearch(query: string, input: FilterInput): Promise<void> {
     searchResultsEl.append(
       errorLine(`검색하지 못했습니다: ${(err as Error).message}`),
     );
+  }
+}
+
+/**
+ * 전 세션 검색의 "도구·기타에도 N건 더 있습니다" 안내. 결과를 먼저 그리고 건수는
+ * 나중에 받아 같은 자리에 끼운다. 세는 동안은 "세는 중" 줄을 두어 "더 없음"과
+ * 구분하고, 그 사이 다른 검색이 시작됐으면 버린다.
+ */
+async function showExcluded(
+  query: string,
+  conditions: string,
+  input: FilterInput,
+  seq: number,
+): Promise<void> {
+  // 조건 줄은 이 함수가 시작된 뒤 맨 위에 붙으므로 이 줄은 그 아래에 놓인다
+  const pending = Object.assign(document.createElement("p"), {
+    className: "muted search-excluded-pending",
+    textContent: `${excludedTierNames(input)} 건수를 세는 중…`,
+  });
+  searchResultsEl.prepend(pending);
+  try {
+    const r = await getJson<ExcludedResponse>(
+      `/api/search/excluded?q=${encodeURIComponent(query)}${conditions}`,
+    );
+    if (seq !== searchSeq) return;
+    const text = describeExcluded(input, r.excludedMatchCount);
+    if (text === "") pending.remove();
+    else pending.replaceWith(excludedNote(text, input));
+  } catch {
+    if (seq !== searchSeq) return;
+    pending.textContent = `${excludedTierNames(input)} 건수를 세지 못했습니다`;
   }
 }
 

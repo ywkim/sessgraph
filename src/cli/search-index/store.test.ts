@@ -13,7 +13,13 @@ import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { after, describe, it } from "node:test";
 
-import { excerptOf, SearchStore, SESSIONS_LIMIT } from "./store.js";
+import type { SearchFilters } from "../../core/types.js";
+import {
+  directOneWhere,
+  excerptOf,
+  SearchStore,
+  SESSIONS_LIMIT,
+} from "./store.js";
 
 const dir = mkdtempSync(path.join(tmpdir(), "search-store-"));
 after(() => rmSync(dir, { recursive: true, force: true }));
@@ -590,8 +596,7 @@ describe("검색 조건", () => {
       const one = store.searchOne(q, file, conversation);
       assert.equal(one.matchCount, 3, q);
       assert.equal(one.excludedMatchCount, 1, q);
-      const all = store.searchAll(q, new Set([file]), conversation);
-      assert.equal(all.excludedMatchCount, 1, q);
+      assert.equal(store.excludedAll(q, new Set([file]), conversation), 1, q);
       // 종류 조건이 없거나 셋 모두면 빠진 것이 없다
       const none = { since: null, until: null, tiers: null };
       assert.equal(store.searchOne(q, file, none).excludedMatchCount, 0, q);
@@ -605,12 +610,191 @@ describe("검색 조건", () => {
       const later = { ...conversation, since: "2026-01-03T00:00:00.000Z" };
       assert.equal(store.searchOne(q, file, later).excludedMatchCount, 0, q);
       // 등록되지 않은 경로의 행은 세지 않는다
-      assert.equal(
-        store.searchAll(q, new Set(), conversation).excludedMatchCount,
-        0,
-        q,
-      );
+      assert.equal(store.excludedAll(q, new Set(), conversation), 0, q);
     }
     store.close();
+  });
+});
+
+describe("세션 하나 검색의 경로 인덱스", () => {
+  const lines = () => [
+    user("Alpha beta gamma", "2026-01-01T00:00:00Z", "a1"),
+    user("alpha BETA delta", "2026-01-02T00:00:00Z", "a2"),
+    user("영상통화 대기열을 비웠다", "2026-01-03T00:00:00Z", "k1"),
+    user("100% 확실하다 a_b 와 a-b", "2026-01-04T00:00:00Z", "p1"),
+    user('인용 "two words" 문구', "2026-01-05T00:00:00Z", "q1"),
+    user("École alpha", "2026-01-06T00:00:00Z", "e1"),
+    user("시각 없는 alpha", null, "n1"),
+    toolUse("alpha tool run", "2026-01-02T12:00:00Z"),
+  ];
+  const queries = [
+    "alpha",
+    "ALPHA",
+    "al",
+    "a",
+    "alpha beta",
+    "beta ALPHA delta",
+    "영상통화 대기열",
+    "대기열",
+    "통화",
+    "대",
+    "100%",
+    "a_b",
+    '"two words"',
+    "two words",
+    "École",
+    "école",
+    "없는낱말",
+  ];
+  const filterSets = [
+    { since: null, until: null, tiers: null },
+    { since: null, until: null, tiers: ["conversation" as const] },
+    { since: null, until: null, tiers: ["tool" as const] },
+    {
+      since: "2026-01-02T00:00:00.000Z",
+      until: "2026-01-05T00:00:00.000Z",
+      tiers: ["conversation" as const],
+    },
+  ];
+
+  it("인덱스 경로와 FTS 경로의 매치·건수·제외 건수가 같다", () => {
+    const file = session(lines());
+    const withIndex = SearchStore.open(cacheDir());
+    const withoutIndex = SearchStore.open(cacheDir(), { pathIndex: false });
+    withIndex.sync(file);
+    withoutIndex.sync(file);
+    for (const q of queries) {
+      for (const filters of filterSets) {
+        const a = withIndex.searchOne(q, file, filters);
+        const b = withoutIndex.searchOne(q, file, filters);
+        const label = `${q} ${JSON.stringify(filters)}`;
+        assert.equal(a.matchCount, b.matchCount, label);
+        assert.equal(a.excludedMatchCount, b.excludedMatchCount, label);
+        assert.deepEqual(a.matches, b.matches, label);
+      }
+    }
+    withIndex.close();
+    withoutIndex.close();
+  });
+
+  it("다른 세션의 행은 섞이지 않는다", () => {
+    const mine = session([user("shared needle", "2026-01-01T00:00:00Z", "m1")]);
+    const other = session([
+      user("shared needle", "2026-01-01T00:00:00Z", "o1"),
+      user("shared needle again", "2026-01-02T00:00:00Z", "o2"),
+    ]);
+    const store = SearchStore.open(cacheDir());
+    store.sync(mine);
+    store.sync(other);
+    assert.equal(store.searchOne("needle", mine).matchCount, 1);
+    assert.equal(store.searchOne("needle", other).matchCount, 2);
+    store.close();
+  });
+
+  it("인덱스를 만들고 FTS 무결성 검사를 통과한다", () => {
+    const cache = cacheDir();
+    const store = SearchStore.open(cache);
+    store.sync(session(lines()));
+    store.close();
+    const db = new DatabaseSync(path.join(cache, "search-v1.sqlite"));
+    const index = db
+      .prepare(
+        "SELECT 1 AS ok FROM sqlite_master WHERE type = 'index' AND name = 'rows_content_path'",
+      )
+      .get();
+    assert.ok(index);
+    // 오류가 있으면 throw한다
+    db.exec("INSERT INTO rows(rows) VALUES ('integrity-check')");
+    db.close();
+  });
+
+  it("인덱스 없이 만든 색인에도 다음 기동에서 인덱스가 생긴다", () => {
+    const cache = cacheDir();
+    const file = session(lines());
+    const first = SearchStore.open(cache, { pathIndex: false });
+    first.sync(file);
+    first.close();
+    const second = SearchStore.open(cache);
+    assert.equal(second.searchOne("alpha", file).matchCount, 5);
+    second.close();
+    const db = new DatabaseSync(path.join(cache, "search-v1.sqlite"));
+    assert.ok(
+      db
+        .prepare(
+          "SELECT 1 AS ok FROM sqlite_master WHERE name = 'rows_content_path'",
+        )
+        .get(),
+    );
+    db.close();
+  });
+});
+
+describe("세션 하나 검색의 인덱스 선택", () => {
+  const lines = () => [
+    user("alpha beta", "2026-01-01T00:00:00Z", "a1"),
+    user("한 발 읽었다", "2026-01-02T00:00:00Z", "k1"),
+    toolUse("alpha tool", "2026-01-02T12:00:00Z"),
+  ];
+  const conv = { since: null, until: null, tiers: ["conversation" as const] };
+  const dated = {
+    since: "2026-01-01T00:00:00.000Z",
+    until: "2026-01-09T00:00:00.000Z",
+    tiers: ["conversation" as const],
+  };
+
+  it("rows_content에 종류 인덱스가 더 있어도 경로 인덱스를 고른다(시각 인덱스와 함께)", () => {
+    const cache = cacheDir();
+    const file = session(lines());
+    const store = SearchStore.open(cache);
+    store.sync(file);
+    store.close();
+    const db = new DatabaseSync(path.join(cache, "search-v1.sqlite"));
+    db.exec("CREATE INDEX extra_tier ON rows_content(c1)");
+    db.exec("CREATE INDEX extra_ts ON rows_content(c3)");
+    const plan = (filters: SearchFilters) => {
+      const direct = directOneWhere("alpha", file, filters);
+      assert.ok(direct);
+      return (
+        db
+          .prepare(
+            `EXPLAIN QUERY PLAN SELECT id FROM rows_content WHERE ${direct.where}`,
+          )
+          .all(...direct.params) as { detail: string }[]
+      )
+        .map((r) => r.detail)
+        .join(" | ");
+    };
+    for (const filters of [conv, dated]) {
+      const text = plan(filters);
+      assert.match(text, /rows_content_path/, text);
+      assert.doesNotMatch(text, /extra_tier|extra_ts/, text);
+    }
+    db.close();
+  });
+
+  it("그 인덱스가 있어도 결과가 같고, 실행 중에 경로 인덱스가 사라져도 같다", () => {
+    const cache = cacheDir();
+    const file = session(lines());
+    const store = SearchStore.open(cache);
+    store.sync(file);
+    const before = store.searchOne("alpha", file, conv);
+    const other = new DatabaseSync(path.join(cache, "search-v1.sqlite"));
+    other.exec("CREATE INDEX extra_tier ON rows_content(c1)");
+    const withExtra = store.searchOne("alpha", file, conv);
+    other.exec("DROP INDEX rows_content_path");
+    const withoutPath = store.searchOne("alpha", file, conv);
+    other.close();
+    assert.equal(before.matchCount, 1);
+    for (const r of [withExtra, withoutPath]) {
+      assert.equal(r.matchCount, before.matchCount);
+      assert.deepEqual(r.matches, before.matches);
+      assert.equal(r.excludedMatchCount, before.excludedMatchCount);
+    }
+    store.close();
+  });
+
+  it("대소문자가 있는 비ASCII 낱말은 직접 조건을 만들지 않는다", () => {
+    assert.equal(directOneWhere("École", "/x", conv), null);
+    assert.ok(directOneWhere("한 발 읽", "/x", conv));
   });
 });

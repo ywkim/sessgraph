@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 
 import {
   describeExcluded,
+  excludedTierNames,
   describeFilters,
   filterQuery,
   type FilterInput,
@@ -69,6 +70,14 @@ describe("describeFilters", () => {
 
   it("기본값과 다르면 종류 셋 모두도 조건 줄에 보인다", () => {
     assert.equal(describeFilters(input()), "조건: 종류 대화, 도구, 기타");
+  });
+});
+
+describe("excludedTierNames", () => {
+  it("체크하지 않은 종류의 이름을 가운뎃점으로 잇고, 없으면 비어 있다", () => {
+    assert.equal(excludedTierNames(input(["conversation"])), "도구·기타");
+    assert.equal(excludedTierNames(input(["conversation", "tool"])), "기타");
+    assert.equal(excludedTierNames(input()), "");
   });
 });
 

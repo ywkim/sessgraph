@@ -92,6 +92,18 @@ export class SearchIndexClient {
     }) as Promise<SearchResult & { kind: "relaxed" }>;
   }
 
+  excludedAll(
+    query: string,
+    filters: SearchFilters = NO_FILTERS,
+  ): Promise<SearchResult & { kind: "excluded" }> {
+    return this.#send({
+      id: this.#nextId++,
+      kind: "excluded",
+      query,
+      filters,
+    }) as Promise<SearchResult & { kind: "excluded" }>;
+  }
+
   async close(): Promise<void> {
     await this.#worker.terminate();
   }

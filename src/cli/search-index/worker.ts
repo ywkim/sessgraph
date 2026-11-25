@@ -44,7 +44,8 @@ function syncPath(s: SearchStore, p: string): void {
 }
 
 /** 지문이 바뀐 경로만 다시 동기화한다. 첫 동기화 전인 경로는 백그라운드에 맡긴다. */
-function refresh(s: SearchStore, paths: readonly string[]): void {
+function refresh(s: SearchStore, paths: readonly string[]): number {
+  let count = 0;
   for (const p of paths) {
     if (!synced.has(p)) continue;
     const prev = synced.get(p);
@@ -57,8 +58,10 @@ function refresh(s: SearchStore, paths: readonly string[]): void {
       prev.size !== now.size
     ) {
       syncPath(s, p);
+      count++;
     }
   }
+  return count;
 }
 
 function progress(s: SearchStore): {
@@ -109,7 +112,28 @@ function handle(req: SearchRequest): SearchReply {
         },
       };
     }
-    refresh(store, req.kind === "all" ? init.paths : [req.path]);
+    if (req.kind === "excluded") {
+      // 직전 전 세션 검색이 이미 색인을 맞췄으므로 다시 맞추지 않는다
+      const { eligible } = progress(store);
+      return {
+        id: req.id,
+        result: {
+          kind: "excluded",
+          excludedMatchCount: store.excludedAll(
+            req.query,
+            eligible,
+            req.filters,
+          ),
+          durationMs: performance.now() - start,
+        },
+      };
+    }
+    const syncStart = performance.now();
+    const syncedFiles = refresh(
+      store,
+      req.kind === "all" ? init.paths : [req.path],
+    );
+    const syncMs = performance.now() - syncStart;
     const { index, eligible } = progress(store);
     let result: SearchResult;
     if (req.kind === "all") {
@@ -119,8 +143,9 @@ function handle(req: SearchRequest): SearchReply {
         index,
         sessions: r.sessions,
         truncatedSessions: r.truncatedSessions,
-        excludedMatchCount: r.excludedMatchCount,
         durationMs: performance.now() - start,
+        syncMs,
+        syncedFiles,
       };
     } else {
       const r = eligible.has(req.path)
@@ -133,6 +158,8 @@ function handle(req: SearchRequest): SearchReply {
         matches: r.matches,
         excludedMatchCount: r.excludedMatchCount,
         durationMs: performance.now() - start,
+        syncMs,
+        syncedFiles,
       };
     }
     return { id: req.id, result };
