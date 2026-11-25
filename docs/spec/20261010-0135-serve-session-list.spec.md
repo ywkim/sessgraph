@@ -1,7 +1,7 @@
 ---
 slug: 20261010-0135-serve-session-list
 status: Current
-updated: 2026-10-15
+updated: 2026-11-25
 related:
   prd: docs/prd/20260902-0420-serve-command.prd.md
   design: docs/design/20260905-0641-multi-session-serve.tdd.md
@@ -43,11 +43,12 @@ related:
 
 또한 **실제 세션 파일 1개**(작업 중인 세션, 구조 필드만 확인, 값은 기록하지 않음)에서 레코드 타입·키 이름·제목 레코드의 바이트 위치를 확인했다.
 
+제목 레코드의 필드 구조는 이 맥의 세션 파일 전체(`~/.claude/projects/*/*.jsonl`)에서 키만 집계해 확인했다(2026-11-25). `custom-title` 39,043줄은 모두 키가 `customTitle`·`sessionId`·`type`이고, `summary` 줄 18,303줄은 모두 `summary`·`leafUuid`·`type`이다. 값은 읽어 기록하지 않았다.
+
 **검증하지 않은 것**
 
 - 실제 약 1,600개 코퍼스. 이 환경에 없다. 아래 수치는 모두 합성 코퍼스이므로 **기준선이 아니다.** 실사용 시 "112개"는 기존 Spec의 2026-10-09 실측을 인용한 값이다.
 - 제목 레코드의 값 품질, 등장 빈도, 재기록 간격의 일반성. 실제 파일 1개에서만 관찰했다.
-- 제목 레코드의 필드 구조는 실제 세션 파일로 확인했다: `custom-title`은 `customTitle`과 `sessionId`, `summary` 줄은 `summary`(글)와 `leafUuid`다. 값은 기록하지 않았다. 합성 코퍼스는 이 구조를 흉내 낸 것이다.
 - 좁은 화면(모바일 폭), 스크롤 중 프레임 드롭, 긴 한글 제목의 줄바꿈. 1280px에서만 측정했다.
 
 ---
@@ -58,7 +59,7 @@ related:
 
 - 근거: 라벨은 `labelOf()`가 만든 `부모디렉터리/파일명`이다 (`src/cli/serve.ts`). 목록은 이것만 보여준다. 현재 코드베이스 어디에도 `ai-title`·`custom-title`·`aiTitle`을 읽는 코드가 없다.
 - 관찰 (실제 세션 파일 1개, 구조만):
-  - 제목 후보는 `ai-title`(필드 `aiTitle`)과 `last-prompt`(필드 `lastPrompt`)이다. `custom-title`은 타입 목록에만 있고 이 파일에는 없다. `ai-title`은 `RecordType` 목록에 없다.
+  - 제목 후보는 `ai-title`(필드 `aiTitle`)과 `last-prompt`(필드 `lastPrompt`)이다. `custom-title`은 타입 목록에만 있고 이 파일에는 없다.
   - `ai-title`은 대화 중 여러 번 기록된다. 이 파일에서 7회였고, 첫 기록은 바이트 129,364(파일의 약 17.6% 지점), 마지막 기록은 파일 끝에서 약 12.6KB 앞이었다.
   - 첫 `user` 메시지는 바이트 4,302, 즉 앞 64KB 창 안에 있다.
   - 따라서 **앞 64KB만으로는 맞는 제목을 고를 수 없다.** 첫 제목 레코드가 창 밖에 있고, 현재 제목은 "마지막 발생"이라 파일 뒤쪽을 읽어야 찾는다.
@@ -85,7 +86,6 @@ related:
 
 **열린 이슈**
 
-- `custom-title`의 필드명은 `customTitle`이다 (실물 확인).
 - `ai-title` 재기록 간격은 관찰 1건에서 나왔다. 뒤 64KB 창에 제목이 없는 파일 비율은 실측 전에는 모른다.
 - 제외 규칙(`isMeta`, `<` 시작)은 구조만으로 판정한다. 실제 질문이 `<`로 시작하는 드문 경우는 건너뛰어 다음 메시지가 쓰인다. 실측: 첫 user 텍스트가 있는 869개 중 286개의 첫 레코드가 `isMeta`, 88개가 `<` 시작이었다.
 
@@ -287,7 +287,7 @@ readonly lastModifiedAt: string | null; // ISO 8601, 파일 mtime. 실패 세션
 - `status === "failed"` ⇔ `lastModifiedAt === null`. 실패 세션은 `firstTimestamp`와 `title`도 모두 null이다.
 - `firstTimestamp === null`인 `ready` 세션은 "시각 없음"이다. 읽기 실패는 `status: "failed"`로 표현한다. 둘을 `firstTimestamp` 값만으로 구분하지 않는다.
 
-`core`에 추가할 관측 타입: `RecordType`에 `"ai-title"`을 추가한다 (현재 목록에 없다). `"summary"`는 필드 확인 후 추가 여부를 정한다.
+`core`의 관측 타입: `RecordType`에는 `"ai-title"`이 이미 있다. `"summary"`를 더할지는 열린 이슈 1이다.
 
 ### 메타 읽기 (`src/core/session-meta.ts` — 신설)
 
