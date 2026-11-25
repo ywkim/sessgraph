@@ -358,11 +358,12 @@ export class SearchStore {
         tiers: excluded,
       });
       if (direct !== null) {
-        const row = this.#directQuery(
-          `SELECT COUNT(*) AS n FROM rows_content INDEXED BY rows_content_path WHERE ${direct.where}`,
-          (stmt) => stmt.get(...direct.params) as { n: number },
-        );
-        if (row !== null) return row.n;
+        const row = this.#db
+          .prepare(
+            `SELECT COUNT(*) AS n FROM rows_content WHERE ${direct.where}`,
+          )
+          .get(...direct.params) as { n: number };
+        return row.n;
       }
     }
     const { fromWhere, params } = this.#fromWhere(query, onlyPath, {
@@ -391,11 +392,11 @@ export class SearchStore {
     if (onlyPath !== null) {
       const direct = this.#directOne(query, onlyPath, filters);
       if (direct !== null) {
-        const hits = this.#directQuery(
-          `SELECT c0 AS path, c1 AS tier, c3 AS ts, id AS rowid FROM rows_content INDEXED BY rows_content_path WHERE ${direct.where}`,
-          (stmt) => stmt.all(...direct.params) as unknown as Hit[],
-        );
-        if (hits !== null) return hits;
+        return this.#db
+          .prepare(
+            `SELECT c0 AS path, c1 AS tier, c3 AS ts, id AS rowid FROM rows_content WHERE ${direct.where}`,
+          )
+          .all(...direct.params) as unknown as Hit[];
       }
     }
     const { fromWhere, params } = this.#fromWhere(query, onlyPath, filters);
@@ -406,57 +407,13 @@ export class SearchStore {
       .all(...params) as unknown as Hit[];
   }
 
-  /**
-   * 세션 하나 검색의 조건. FTS의 `path` 열은 인덱스가 없어 한 세션을 찾아도 매치가 있는
-   * 모든 행의 경로를 읽는다. 내용 테이블의 경로 인덱스로 그 세션의 행만 고르고 낱말마다
-   * `LIKE`로 거른다. 인덱스가 없거나, 대소문자가 있는 비ASCII 글자가 든 낱말(`LIKE`는
-   * ASCII만 대소문자를 접는다)이면 null이라 FTS 경로로 찾는다.
-   */
-  /**
-   * 경로 인덱스를 고정해(`INDEXED BY`) 질의한다. `rows_content`에 인덱스가 더 있으면
-   * 플래너가 다른 인덱스를 골라 같은 질의가 수십 배 느려진 적이 있다(종류 인덱스를 고르면
-   * 0.09초가 5.8초). 인덱스가 사라졌거나 질의가 실패하면 쓰지 않도록 표시하고 null을 돌려
-   * 줘 FTS 경로로 찾게 한다.
-   */
-  #directQuery<T>(
-    sql: string,
-    run: (stmt: ReturnType<DatabaseSync["prepare"]>) => T,
-  ): T | null {
-    try {
-      return run(this.#db.prepare(sql));
-    } catch {
-      this.#pathIndexed = false;
-      return null;
-    }
-  }
-
+  /** 경로 인덱스가 있고 낱말이 `LIKE`로 같은 결과를 낼 때만 직접 질의 조건을 돌려준다. */
   #directOne(
     query: string,
     filePath: string,
     filters: SearchFilters,
   ): { where: string; params: (string | number)[] } | null {
-    if (!this.#pathIndexed) return null;
-    const terms = searchTerms(query);
-    if (terms.some(hasCasedNonAscii)) return null;
-    const where = ["c0 = ?"];
-    const params: (string | number)[] = [filePath];
-    for (const term of terms) {
-      where.push("c4 LIKE ? ESCAPE '\\'");
-      params.push(`%${term.replace(/[\\%_]/g, (c) => `\\${c}`)}%`);
-    }
-    if (filters.since !== null) {
-      where.push("c3 >= ?");
-      params.push(filters.since);
-    }
-    if (filters.until !== null) {
-      where.push("c3 < ?");
-      params.push(filters.until);
-    }
-    if (filters.tiers !== null) {
-      where.push(`c1 IN (${filters.tiers.map(() => "?").join(", ")})`);
-      params.push(...filters.tiers.map((t) => TIERS.indexOf(t)));
-    }
-    return { where: where.join(" AND "), params };
+    return this.#pathIndexed ? directOneWhere(query, filePath, filters) : null;
   }
 
   /**
@@ -671,6 +628,45 @@ function compareTsDesc(a: string | null, b: string | null): number {
   if (a === null) return 1;
   if (b === null) return -1;
   return a < b ? 1 : -1;
+}
+
+/**
+ * 세션 하나 검색의 조건(`rows_content` 열 이름). FTS의 `path` 열은 인덱스가 없어 한 세션을
+ * 찾아도 매치가 있는 모든 행의 경로를 읽는다. 내용 테이블의 경로 인덱스(`c0`)로 그 세션의
+ * 행만 고르고 낱말마다 `LIKE`로 거른다. `LIKE`는 ASCII만 대소문자를 접으므로 대소문자가 있는
+ * 비ASCII 글자가 든 낱말이면 null이라 FTS 경로로 찾는다.
+ *
+ * `c0` 말고 인덱스를 탈 수 있는 열(`c1`·`c3`)에는 단항 `+`를 붙여 인덱스 후보에서 뺀다.
+ * `rows_content`에 인덱스가 더 있으면 플래너가 그쪽을 골라 같은 질의가 수십 배 느려진 적이
+ * 있다(종류 인덱스를 고르면 0.09초가 5.8초). `INDEXED BY`는 쓰지 않는다 — 인덱스가 없으면
+ * 오류가 나는 마지막 수단이고, 단항 `+`는 인덱스가 없어도 질의가 돈다.
+ */
+export function directOneWhere(
+  query: string,
+  filePath: string,
+  filters: SearchFilters,
+): { where: string; params: (string | number)[] } | null {
+  const terms = searchTerms(query);
+  if (terms.some(hasCasedNonAscii)) return null;
+  const where = ["c0 = ?"];
+  const params: (string | number)[] = [filePath];
+  for (const term of terms) {
+    where.push("c4 LIKE ? ESCAPE '\\'");
+    params.push(`%${term.replace(/[\\%_]/g, (c) => `\\${c}`)}%`);
+  }
+  if (filters.since !== null) {
+    where.push("+c3 >= ?");
+    params.push(filters.since);
+  }
+  if (filters.until !== null) {
+    where.push("+c3 < ?");
+    params.push(filters.until);
+  }
+  if (filters.tiers !== null) {
+    where.push(`+c1 IN (${filters.tiers.map(() => "?").join(", ")})`);
+    params.push(...filters.tiers.map((t) => TIERS.indexOf(t)));
+  }
+  return { where: where.join(" AND "), params };
 }
 
 /** ASCII가 아니면서 대소문자가 있는 글자가 든 문자열. 한글·한자·숫자는 해당하지 않는다. */
