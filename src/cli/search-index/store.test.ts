@@ -742,7 +742,7 @@ describe("세션 하나 검색의 인덱스 선택", () => {
     tiers: ["conversation" as const],
   };
 
-  it("rows_content에 종류·시각 인덱스가 더 있어도 경로 인덱스를 고른다", () => {
+  it("rows_content에 종류 인덱스가 더 있어도 경로 인덱스를 고른다(시각 인덱스와 함께)", () => {
     const cache = cacheDir();
     const file = session(lines());
     const store = SearchStore.open(cache);
