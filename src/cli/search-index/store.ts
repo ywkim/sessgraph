@@ -67,11 +67,35 @@ interface Hit {
   readonly rowid: number;
 }
 
+export interface SearchStoreOptions {
+  /** 세션 하나 검색이 쓰는 경로 열 인덱스를 만들고 쓴다. 기본 true. 시험이 FTS 경로와 비교하려고 끈다 */
+  readonly pathIndex?: boolean;
+}
+
 export class SearchStore {
   readonly #db: DatabaseSync;
+  /** `rows_content(c0)` 인덱스가 있어 세션 하나 검색이 그 세션의 행만 훑는다 */
+  #pathIndexed = false;
 
-  private constructor(db: DatabaseSync) {
+  private constructor(db: DatabaseSync, pathIndex: boolean) {
     this.#db = db;
+    if (pathIndex) this.#ensurePathIndex();
+  }
+
+  /**
+   * FTS5 내용 테이블의 경로 열(`c0`)에 인덱스를 건다. 열 순서는 `rows` 선언 순서
+   * (path, tier, uuid, ts, body = c0..c4)다. 인덱스를 만들지 못하면(다른 프로세스가
+   * 쓰는 중 등) 쓰지 않고 FTS 경로로 찾는다 — 색인을 지우지 않는다.
+   */
+  #ensurePathIndex(): void {
+    try {
+      this.#db.exec(
+        "CREATE INDEX IF NOT EXISTS rows_content_path ON rows_content(c0)",
+      );
+      this.#pathIndexed = true;
+    } catch {
+      this.#pathIndexed = false;
+    }
   }
 
   /**
@@ -79,17 +103,21 @@ export class SearchStore {
    * 못하면 지우고 새로 만든다 — 색인은 캐시다 (Spec "기동과 첫 생성").
    * 캐시 디렉터리를 만들 수 없으면 throw한다.
    */
-  static open(cacheDir: string): SearchStore {
+  static open(cacheDir: string, options: SearchStoreOptions = {}): SearchStore {
     mkdirSync(cacheDir, { recursive: true, mode: 0o700 });
     const file = path.join(cacheDir, FILE_NAME);
+    const pathIndex = options.pathIndex ?? true;
+    let db: DatabaseSync;
     try {
-      return new SearchStore(openValid(file));
+      db = openValid(file);
     } catch {
       for (const suffix of ["", "-wal", "-shm"]) {
         rmSync(file + suffix, { force: true });
       }
-      return new SearchStore(openValid(file));
+      db = openValid(file);
     }
+    // 인덱스 생성은 파일을 지우고 다시 만드는 경로 밖에서 한다
+    return new SearchStore(db, pathIndex);
   }
 
   close(): void {
@@ -324,6 +352,20 @@ export class SearchStore {
     if (filters.tiers === null) return 0;
     const excluded = TIERS.filter((t) => !filters.tiers!.includes(t));
     if (excluded.length === 0) return 0;
+    if (onlyPath !== null) {
+      const direct = this.#directOne(query, onlyPath, {
+        ...filters,
+        tiers: excluded,
+      });
+      if (direct !== null) {
+        const row = this.#db
+          .prepare(
+            `SELECT COUNT(*) AS n FROM rows_content WHERE ${direct.where}`,
+          )
+          .get(...direct.params) as { n: number };
+        return row.n;
+      }
+    }
     const { fromWhere, params } = this.#fromWhere(query, onlyPath, {
       ...filters,
       tiers: excluded,
@@ -347,12 +389,57 @@ export class SearchStore {
     onlyPath: string | null,
     filters: SearchFilters,
   ): Hit[] {
+    if (onlyPath !== null) {
+      const direct = this.#directOne(query, onlyPath, filters);
+      if (direct !== null) {
+        return this.#db
+          .prepare(
+            `SELECT c0 AS path, c1 AS tier, c3 AS ts, id AS rowid FROM rows_content WHERE ${direct.where}`,
+          )
+          .all(...direct.params) as unknown as Hit[];
+      }
+    }
     const { fromWhere, params } = this.#fromWhere(query, onlyPath, filters);
     return this.#db
       .prepare(
         `SELECT rows.path AS path, rows.tier AS tier, rows.ts AS ts, rows.rowid AS rowid FROM ${fromWhere}`,
       )
       .all(...params) as unknown as Hit[];
+  }
+
+  /**
+   * 세션 하나 검색의 조건. FTS의 `path` 열은 인덱스가 없어 한 세션을 찾아도 매치가 있는
+   * 모든 행의 경로를 읽는다. 내용 테이블의 경로 인덱스로 그 세션의 행만 고르고 낱말마다
+   * `LIKE`로 거른다. 인덱스가 없거나, 대소문자가 있는 비ASCII 글자가 든 낱말(`LIKE`는
+   * ASCII만 대소문자를 접는다)이면 null이라 FTS 경로로 찾는다.
+   */
+  #directOne(
+    query: string,
+    filePath: string,
+    filters: SearchFilters,
+  ): { where: string; params: (string | number)[] } | null {
+    if (!this.#pathIndexed) return null;
+    const terms = searchTerms(query);
+    if (terms.some(hasCasedNonAscii)) return null;
+    const where = ["c0 = ?"];
+    const params: (string | number)[] = [filePath];
+    for (const term of terms) {
+      where.push("c4 LIKE ? ESCAPE '\\'");
+      params.push(`%${term.replace(/[\\%_]/g, (c) => `\\${c}`)}%`);
+    }
+    if (filters.since !== null) {
+      where.push("c3 >= ?");
+      params.push(filters.since);
+    }
+    if (filters.until !== null) {
+      where.push("c3 < ?");
+      params.push(filters.until);
+    }
+    if (filters.tiers !== null) {
+      where.push(`c1 IN (${filters.tiers.map(() => "?").join(", ")})`);
+      params.push(...filters.tiers.map((t) => TIERS.indexOf(t)));
+    }
+    return { where: where.join(" AND "), params };
   }
 
   /**
@@ -567,6 +654,16 @@ function compareTsDesc(a: string | null, b: string | null): number {
   if (a === null) return 1;
   if (b === null) return -1;
   return a < b ? 1 : -1;
+}
+
+/** ASCII가 아니면서 대소문자가 있는 글자가 든 문자열. 한글·한자·숫자는 해당하지 않는다. */
+function hasCasedNonAscii(term: string): boolean {
+  for (const ch of term) {
+    if (ch.charCodeAt(0) > 0x7f && ch.toLowerCase() !== ch.toUpperCase()) {
+      return true;
+    }
+  }
+  return false;
 }
 
 function codePointLength(s: string): number {
