@@ -1314,7 +1314,9 @@ function showBanner(message: string): void {
   bannerEl.hidden = false;
 }
 
+/** 화면에 오류 줄을 만들고 같은 글을 화면 읽기 프로그램에도 알린다. */
 function errorLine(message: string): HTMLElement {
+  announce(message);
   const p = document.createElement("p");
   p.className = "warning";
   p.textContent = message;
