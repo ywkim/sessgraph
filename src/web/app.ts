@@ -291,7 +291,7 @@ function renderSessionList(sessions: readonly SessionSummary[]): void {
   searchResultsEl.innerHTML = "";
   summaryEl.textContent = `세션 ${sessions.length}개 (기동 시점 기준)`;
   bannerEl.hidden = true;
-  warningsEl.innerHTML = "";
+  clearWarnings();
   timelineEl.innerHTML = "";
 
   const list = document.createElement("div");
@@ -361,7 +361,7 @@ async function openSession(
   discardPendingSearch();
   searchResultsEl.innerHTML = "";
   bannerEl.hidden = true;
-  warningsEl.innerHTML = "";
+  clearWarnings();
   timelineEl.innerHTML = `<p class="muted">읽는 중…</p>`;
 
   let index: IndexResult;
@@ -409,6 +409,13 @@ async function openSession(
 }
 
 /** 도구가 판단하지 못한 케이스를 숨기지 않는다 (ADR-0004). */
+/** 경고가 없을 때는 빈 랜드마크를 남기지 않는다. */
+function clearWarnings(): void {
+  warningsEl.innerHTML = "";
+  warningsEl.removeAttribute("role");
+  warningsEl.removeAttribute("aria-label");
+}
+
 function renderWarnings(index: IndexResult): void {
   const items: string[] = [];
   if (index.unresolvedDuplicates.length > 0) {
@@ -425,6 +432,10 @@ function renderWarnings(index: IndexResult): void {
   }
   if (index.malformedLines.length > 0) {
     items.push(`${index.malformedLines.length}개 줄을 읽지 못함`);
+  }
+  if (items.length > 0) {
+    warningsEl.setAttribute("role", "region");
+    warningsEl.setAttribute("aria-label", "색인 경고");
   }
   for (const text of items) {
     const div = document.createElement("div");
