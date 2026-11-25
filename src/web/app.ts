@@ -289,7 +289,7 @@ function renderSessionList(sessions: readonly SessionSummary[]): void {
   revealedUuid = null;
   discardPendingSearch();
   searchResultsEl.innerHTML = "";
-  summaryEl.textContent = `세션 ${sessions.length}개`;
+  summaryEl.textContent = `세션 ${sessions.length}개 (기동 시점 기준)`;
   bannerEl.hidden = true;
   warningsEl.innerHTML = "";
   timelineEl.innerHTML = "";
