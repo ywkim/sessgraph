@@ -30,6 +30,12 @@ export type SearchRequest =
       readonly kind: "relaxed";
       readonly query: string;
       readonly filters: SearchFilters;
+    }
+  | {
+      readonly id: number;
+      readonly kind: "excluded";
+      readonly query: string;
+      readonly filters: SearchFilters;
     };
 
 export interface IndexProgress {
@@ -61,13 +67,12 @@ export interface WorkerSessionHits {
 
 export type SearchResult =
   | RelaxedResult
+  | ExcludedResult
   | {
       readonly kind: "all";
       readonly index: IndexProgress;
       readonly sessions: readonly WorkerSessionHits[];
       readonly truncatedSessions: boolean;
-      /** 종류 조건 때문에 빠진 매치의 수 */
-      readonly excludedMatchCount: number;
       readonly durationMs: number;
       /** 질의 앞에서 바뀐 파일을 가려 동기화하는 데 쓴 시간(지문 확인 포함)과 동기화한 파일 수 */
       readonly syncMs: number;
@@ -84,6 +89,13 @@ export type SearchResult =
       readonly syncMs: number;
       readonly syncedFiles: number;
     };
+
+export type ExcludedResult = {
+  readonly kind: "excluded";
+  /** 종류 조건 때문에 빠진 매치의 수 */
+  readonly excludedMatchCount: number;
+  readonly durationMs: number;
+};
 
 export type RelaxedResult = {
   readonly kind: "relaxed";

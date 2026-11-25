@@ -590,8 +590,7 @@ describe("검색 조건", () => {
       const one = store.searchOne(q, file, conversation);
       assert.equal(one.matchCount, 3, q);
       assert.equal(one.excludedMatchCount, 1, q);
-      const all = store.searchAll(q, new Set([file]), conversation);
-      assert.equal(all.excludedMatchCount, 1, q);
+      assert.equal(store.excludedAll(q, new Set([file]), conversation), 1, q);
       // 종류 조건이 없거나 셋 모두면 빠진 것이 없다
       const none = { since: null, until: null, tiers: null };
       assert.equal(store.searchOne(q, file, none).excludedMatchCount, 0, q);
@@ -605,11 +604,7 @@ describe("검색 조건", () => {
       const later = { ...conversation, since: "2026-01-03T00:00:00.000Z" };
       assert.equal(store.searchOne(q, file, later).excludedMatchCount, 0, q);
       // 등록되지 않은 경로의 행은 세지 않는다
-      assert.equal(
-        store.searchAll(q, new Set(), conversation).excludedMatchCount,
-        0,
-        q,
-      );
+      assert.equal(store.excludedAll(q, new Set(), conversation), 0, q);
     }
     store.close();
   });
