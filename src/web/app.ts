@@ -62,6 +62,7 @@ const OVERSCAN = 5;
 
 const summaryEl = document.getElementById("summary")!;
 const bannerEl = document.getElementById("banner")!;
+const liveEl = document.getElementById("live")!;
 const warningsEl = document.getElementById("warnings")!;
 const timelineEl = document.getElementById("timeline")!;
 const searchResultsEl = document.getElementById("search-results")!;
@@ -858,6 +859,11 @@ async function runSearch(query: string, input: FilterInput): Promise<void> {
       searchResultsEl.append(
         result.matchCount === 0 ? noMatchesNote(result.index) : box,
       );
+      announce(
+        result.matchCount === 0
+          ? noMatchesText(result.index)
+          : `이 세션에서 ${result.matchCount}건을 찾았습니다`,
+      );
     } else {
       const result = await getJson<SearchResponse>(
         `/api/search?q=${encodeURIComponent(query)}${conditions}`,
@@ -940,8 +946,10 @@ function renderMultiSessionResults(result: SearchResponse): void {
   searchResultsEl.append(...indexNotes(result.index));
   if (result.sessions.length === 0) {
     searchResultsEl.append(noMatchesNote(result.index));
+    announce(noMatchesText(result.index));
     return;
   }
+  announce(`세션 ${result.sessions.length}개에서 찾았습니다`);
   if (result.truncatedSessions) {
     searchResultsEl.append(
       Object.assign(document.createElement("div"), {
@@ -1063,11 +1071,13 @@ function feedbackButton(
     ).then(
       () => {
         button.textContent = doneLabel;
+        announce(doneLabel);
         onRecorded?.();
       },
       (err: unknown) => {
         button.disabled = false;
         button.textContent = `기록하지 못했습니다: ${(err as Error).message}`;
+        announce(button.textContent);
       },
     );
   });
@@ -1185,14 +1195,20 @@ function relaxedNote(relaxed: RelaxedResponse["relaxed"]): HTMLElement {
   return note;
 }
 
+/** 0건 문장. 색인 중이거나 실패 세션이 있으면 단서를 덧붙인다. 화면과 알림이 같은 글을 쓴다. */
+function noMatchesText(index: IndexStatus): string {
+  let text = "찾지 못했습니다";
+  if (!index.ready) text += " — 아직 색인 중이라 결과가 일부입니다";
+  if (index.failed.length > 0) {
+    text += ` — 색인하지 못한 세션 ${index.failed.length}개는 찾지 않았습니다`;
+  }
+  return text;
+}
+
 function noMatchesNote(index: IndexStatus): HTMLElement {
   const p = document.createElement("p");
   p.className = "muted";
-  p.textContent = "찾지 못했습니다";
-  if (!index.ready) p.textContent += " — 아직 색인 중이라 결과가 일부입니다";
-  if (index.failed.length > 0) {
-    p.textContent += ` — 색인하지 못한 세션 ${index.failed.length}개는 찾지 않았습니다`;
-  }
+  p.textContent = noMatchesText(index);
   return p;
 }
 
@@ -1286,6 +1302,11 @@ function applyRevealed(): void {
     const uuid = el.querySelector(".node-head .uuid")?.textContent;
     el.classList.toggle("revealed", uuid === revealedUuid);
   }
+}
+
+/** 화면 읽기 프로그램에 상태를 알린다 (WCAG 4.1.3). 영역은 처음 마크업에 있고 글만 바꾼다. */
+function announce(message: string): void {
+  liveEl.textContent = message;
 }
 
 function showBanner(message: string): void {
