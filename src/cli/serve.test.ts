@@ -513,8 +513,26 @@ test("serve: 검색과 결과에서 누른 귀속 요청을 검색 기록에 남
         [all.searchId, undefined, undefined],
       );
 
+      // 검색 줄은 시간을 나눠 남긴다: 동기화 ≤ 워커 ≤ 전체
+      for (const e of events.filter(
+        (e) => (e as { kind?: string }).kind === "search",
+      )) {
+        const t = e as {
+          durationMs: number;
+          workerMs: number;
+          syncMs: number;
+          syncedFiles: number;
+        };
+        assert.ok(t.syncMs >= 0 && t.syncMs <= t.workerMs);
+        assert.ok(t.workerMs <= t.durationMs);
+        assert.ok(Number.isInteger(t.syncedFiles) && t.syncedFiles >= 0);
+      }
+
       const strip = ({
         durationMs: _d,
+        workerMs: _w,
+        syncMs: _m,
+        syncedFiles: _f,
         searchId: _s,
         ...rest
       }: Record<string, unknown>) => rest;
@@ -1353,4 +1371,29 @@ test("serve: 메타 읽기 오류는 그 세션만 failed로 승격하고 복구
     assert.equal(ok!.status, "unread");
     assert.equal(ok!.title, "질문");
   });
+});
+
+test("serve: 검색 기록의 syncedFiles는 바뀐 파일만 센다", async () => {
+  const a = sessionFile("a.jsonl", convLine(U(1), null, "needle one"));
+  const events: unknown[] = [];
+  const log: SearchLog = { record: (e) => void events.push(e) };
+  await withSearchServer(
+    [a],
+    async (base) => {
+      await fetch(`${base}/api/search?q=needle`);
+      events.length = 0;
+      await fetch(`${base}/api/search?q=needle`);
+      appendFileSync(a, convLine(U(2), U(1), "needle two") + "\n");
+      const after = (await (
+        await fetch(`${base}/api/search?q=needle`)
+      ).json()) as SearchResponse;
+      assert.equal(after.sessions[0]!.matchCount, 2);
+      assert.deepEqual(
+        events.map((e) => (e as { syncedFiles: number }).syncedFiles),
+        [0, 1],
+      );
+    },
+    undefined,
+    log,
+  );
 });

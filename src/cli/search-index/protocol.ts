@@ -69,6 +69,9 @@ export type SearchResult =
       /** 종류 조건 때문에 빠진 매치의 수 */
       readonly excludedMatchCount: number;
       readonly durationMs: number;
+      /** 질의 앞에서 바뀐 파일을 가려 동기화하는 데 쓴 시간(지문 확인 포함)과 동기화한 파일 수 */
+      readonly syncMs: number;
+      readonly syncedFiles: number;
     }
   | {
       readonly kind: "one";
@@ -78,6 +81,8 @@ export type SearchResult =
       /** 종류 조건 때문에 빠진 매치의 수 */
       readonly excludedMatchCount: number;
       readonly durationMs: number;
+      readonly syncMs: number;
+      readonly syncedFiles: number;
     };
 
 export type RelaxedResult = {
