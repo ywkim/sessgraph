@@ -861,7 +861,7 @@ async function runSearch(query: string, input: FilterInput): Promise<void> {
       );
       announce(
         result.matchCount === 0
-          ? "찾지 못했습니다"
+          ? noMatchesText(result.index)
           : `이 세션에서 ${result.matchCount}건을 찾았습니다`,
       );
     } else {
@@ -946,7 +946,7 @@ function renderMultiSessionResults(result: SearchResponse): void {
   searchResultsEl.append(...indexNotes(result.index));
   if (result.sessions.length === 0) {
     searchResultsEl.append(noMatchesNote(result.index));
-    announce("찾지 못했습니다");
+    announce(noMatchesText(result.index));
     return;
   }
   announce(`세션 ${result.sessions.length}개에서 찾았습니다`);
@@ -1195,14 +1195,20 @@ function relaxedNote(relaxed: RelaxedResponse["relaxed"]): HTMLElement {
   return note;
 }
 
+/** 0건 문장. 색인 중이거나 실패 세션이 있으면 단서를 덧붙인다. 화면과 알림이 같은 글을 쓴다. */
+function noMatchesText(index: IndexStatus): string {
+  let text = "찾지 못했습니다";
+  if (!index.ready) text += " — 아직 색인 중이라 결과가 일부입니다";
+  if (index.failed.length > 0) {
+    text += ` — 색인하지 못한 세션 ${index.failed.length}개는 찾지 않았습니다`;
+  }
+  return text;
+}
+
 function noMatchesNote(index: IndexStatus): HTMLElement {
   const p = document.createElement("p");
   p.className = "muted";
-  p.textContent = "찾지 못했습니다";
-  if (!index.ready) p.textContent += " — 아직 색인 중이라 결과가 일부입니다";
-  if (index.failed.length > 0) {
-    p.textContent += ` — 색인하지 못한 세션 ${index.failed.length}개는 찾지 않았습니다`;
-  }
+  p.textContent = noMatchesText(index);
   return p;
 }
 
