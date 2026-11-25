@@ -904,7 +904,8 @@ async function runSearch(query: string, input: FilterInput): Promise<void> {
 
 /**
  * 전 세션 검색의 "도구·기타에도 N건 더 있습니다" 안내. 결과를 먼저 그리고 건수는
- * 나중에 받아 조건 줄 아래에 끼운다. 그 사이 다른 검색이 시작됐으면 버린다.
+ * 나중에 받아 같은 자리에 끼운다. 세는 동안은 "세는 중" 줄을 두어 "더 없음"과
+ * 구분하고, 그 사이 다른 검색이 시작됐으면 버린다.
  */
 async function showExcluded(
   query: string,
@@ -912,19 +913,23 @@ async function showExcluded(
   input: FilterInput,
   seq: number,
 ): Promise<void> {
+  // 조건 줄은 이 함수가 시작된 뒤 맨 위에 붙으므로 이 줄은 그 아래에 놓인다
+  const pending = Object.assign(document.createElement("p"), {
+    className: "muted search-excluded-pending",
+    textContent: "도구·기타 건수를 세는 중…",
+  });
+  searchResultsEl.prepend(pending);
   try {
     const r = await getJson<ExcludedResponse>(
       `/api/search/excluded?q=${encodeURIComponent(query)}${conditions}`,
     );
     if (seq !== searchSeq) return;
     const text = describeExcluded(input, r.excludedMatchCount);
-    if (text === "") return;
-    const note = excludedNote(text, input);
-    const conditionsLine = searchResultsEl.querySelector(".search-conditions");
-    if (conditionsLine) conditionsLine.after(note);
-    else searchResultsEl.prepend(note);
+    if (text === "") pending.remove();
+    else pending.replaceWith(excludedNote(text, input));
   } catch {
-    // 덧붙이는 안내라 실패해도 결과는 그대로 둔다
+    if (seq !== searchSeq) return;
+    pending.textContent = "도구·기타 건수를 세지 못했습니다";
   }
 }
 
