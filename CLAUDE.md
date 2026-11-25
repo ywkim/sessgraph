@@ -29,7 +29,7 @@ npm install
 npm run build          # tsc
 npm test               # 골든 픽스처 회귀 포함
 npm run lint           # eslint
-npm run lint:docs      # 문서 거버넌스 검사 (PRD 순수성, ADR 불변성, 구조)
+npm run lint:docs      # 문서 거버넌스 검사 (PRD 순수성, ADR 불변성, 구조, updated 날짜)
 npm run type-check     # tsc --noEmit
 ```
 
@@ -181,6 +181,6 @@ related:
 
 **status**는 진행도가 아니라 currency(지금도 참조할 최신 버전인가)를 뜻한다.
 
-**자동화**: `npm run lint:docs`가 PRD 기술 용어, Design 링크 유효성, ADR 불변성·번호 충돌, 문서 구조·파일명을 검사한다. CI가 모든 PR에서 실행한다.
+**자동화**: `npm run lint:docs`가 PRD 기술 용어, Design 링크 유효성, ADR 불변성·번호 충돌, 문서 구조·파일명, 바뀐 PRD/Design/Spec의 `updated:` 날짜를 검사한다. CI가 모든 PR에서 실행한다.
 
 **일반 규칙**: 한국어, Markdown. frontmatter는 파일 첫 줄부터 시작 (파서 호환성).

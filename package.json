@@ -18,10 +18,11 @@
     "lint": "eslint .",
     "format": "prettier --write \"**/*.{ts,tsx,js,json,md}\"",
     "format:check": "prettier --check \"**/*.{ts,tsx,js,json,md}\"",
-    "lint:docs": "npm run lint:docs:prd && npm run lint:docs:design && npm run lint:docs:adr && npm run lint:docs:structure",
+    "lint:docs": "npm run lint:docs:prd && npm run lint:docs:design && npm run lint:docs:adr && npm run lint:docs:structure && npm run lint:docs:updated",
     "lint:docs:prd": "node scripts/lint-prd-purity.js",
     "lint:docs:design": "node scripts/lint-design-doc.js",
     "lint:docs:adr": "node scripts/check-adr-immutable.js",
+    "lint:docs:updated": "node scripts/check-doc-updated.js",
     "lint:docs:structure": "node scripts/validate-doc-structure.js --type=prd && node scripts/validate-doc-structure.js --type=design && node scripts/validate-doc-structure.js --type=spec"
   },
   "devDependencies": {
