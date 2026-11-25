@@ -62,6 +62,7 @@ const OVERSCAN = 5;
 
 const summaryEl = document.getElementById("summary")!;
 const bannerEl = document.getElementById("banner")!;
+const liveEl = document.getElementById("live")!;
 const warningsEl = document.getElementById("warnings")!;
 const timelineEl = document.getElementById("timeline")!;
 const searchResultsEl = document.getElementById("search-results")!;
@@ -858,6 +859,11 @@ async function runSearch(query: string, input: FilterInput): Promise<void> {
       searchResultsEl.append(
         result.matchCount === 0 ? noMatchesNote(result.index) : box,
       );
+      announce(
+        result.matchCount === 0
+          ? "찾지 못했습니다"
+          : `이 세션에서 ${result.matchCount}건을 찾았습니다`,
+      );
     } else {
       const result = await getJson<SearchResponse>(
         `/api/search?q=${encodeURIComponent(query)}${conditions}`,
@@ -940,8 +946,10 @@ function renderMultiSessionResults(result: SearchResponse): void {
   searchResultsEl.append(...indexNotes(result.index));
   if (result.sessions.length === 0) {
     searchResultsEl.append(noMatchesNote(result.index));
+    announce("찾지 못했습니다");
     return;
   }
+  announce(`세션 ${result.sessions.length}개에서 찾았습니다`);
   if (result.truncatedSessions) {
     searchResultsEl.append(
       Object.assign(document.createElement("div"), {
@@ -1063,11 +1071,13 @@ function feedbackButton(
     ).then(
       () => {
         button.textContent = doneLabel;
+        announce(doneLabel);
         onRecorded?.();
       },
       (err: unknown) => {
         button.disabled = false;
         button.textContent = `기록하지 못했습니다: ${(err as Error).message}`;
+        announce(button.textContent);
       },
     );
   });
@@ -1286,6 +1296,11 @@ function applyRevealed(): void {
     const uuid = el.querySelector(".node-head .uuid")?.textContent;
     el.classList.toggle("revealed", uuid === revealedUuid);
   }
+}
+
+/** 화면 읽기 프로그램에 상태를 알린다 (WCAG 4.1.3). 영역은 처음 마크업에 있고 글만 바꾼다. */
+function announce(message: string): void {
+  liveEl.textContent = message;
 }
 
 function showBanner(message: string): void {
