@@ -36,7 +36,7 @@ export type SearchLogEvent = (
       readonly durationMs: number;
       /** 검색 워커가 요청을 받아 답을 만드는 데 쓴 시간. `durationMs`와의 차이가 워커 밖에서(대기·전달·귀속) 쓴 시간이다 */
       readonly workerMs?: number;
-      /** 워커가 질의 앞에서 바뀐 파일을 동기화하는 데 쓴 시간(`workerMs`에 든다)과 그 파일 수 */
+      /** 워커가 질의 앞에서 바뀐 파일을 가려 동기화하는 데 쓴 시간(`workerMs`에 든다. 파일 지문 확인도 들어 있어 0개를 동기화해도 0이 아니다)과 동기화한 파일 수 */
       readonly syncMs?: number;
       readonly syncedFiles?: number;
       /** 전 세션 검색에만 있다. 이어지는 open·answer·notfound가 이 값으로 검색에 이어진다 */

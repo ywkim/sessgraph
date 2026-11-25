@@ -1372,3 +1372,28 @@ test("serve: 메타 읽기 오류는 그 세션만 failed로 승격하고 복구
     assert.equal(ok!.title, "질문");
   });
 });
+
+test("serve: 검색 기록의 syncedFiles는 바뀐 파일만 센다", async () => {
+  const a = sessionFile("a.jsonl", convLine(U(1), null, "needle one"));
+  const events: unknown[] = [];
+  const log: SearchLog = { record: (e) => void events.push(e) };
+  await withSearchServer(
+    [a],
+    async (base) => {
+      await fetch(`${base}/api/search?q=needle`);
+      events.length = 0;
+      await fetch(`${base}/api/search?q=needle`);
+      appendFileSync(a, convLine(U(2), U(1), "needle two") + "\n");
+      const after = (await (
+        await fetch(`${base}/api/search?q=needle`)
+      ).json()) as SearchResponse;
+      assert.equal(after.sessions[0]!.matchCount, 2);
+      assert.deepEqual(
+        events.map((e) => (e as { syncedFiles: number }).syncedFiles),
+        [0, 1],
+      );
+    },
+    undefined,
+    log,
+  );
+});
