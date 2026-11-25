@@ -722,3 +722,44 @@ describe("세션 하나 검색의 경로 인덱스", () => {
     db.close();
   });
 });
+
+describe("경로 인덱스 고정", () => {
+  const lines = () => [
+    user("alpha beta", "2026-01-01T00:00:00Z", "a1"),
+    user("한 발 읽었다", "2026-01-02T00:00:00Z", "k1"),
+    toolUse("alpha tool", "2026-01-02T12:00:00Z"),
+  ];
+  const conv = { since: null, until: null, tiers: ["conversation" as const] };
+
+  it("rows_content에 다른 인덱스가 있어도 결과가 같다", () => {
+    const cache = cacheDir();
+    const file = session(lines());
+    const store = SearchStore.open(cache);
+    store.sync(file);
+    const before = store.searchOne("alpha", file, conv);
+    const other = new DatabaseSync(path.join(cache, "search-v1.sqlite"));
+    other.exec("CREATE INDEX extra_tier ON rows_content(c1)");
+    other.close();
+    const after = store.searchOne("alpha", file, conv);
+    assert.equal(after.matchCount, 1);
+    assert.deepEqual(after.matches, before.matches);
+    assert.equal(after.excludedMatchCount, before.excludedMatchCount);
+    store.close();
+  });
+
+  it("실행 중에 경로 인덱스가 사라져도 FTS 경로로 같은 결과를 낸다", () => {
+    const cache = cacheDir();
+    const file = session(lines());
+    const store = SearchStore.open(cache);
+    store.sync(file);
+    const before = store.searchOne("한", file, conv);
+    const other = new DatabaseSync(path.join(cache, "search-v1.sqlite"));
+    other.exec("DROP INDEX rows_content_path");
+    other.close();
+    const after = store.searchOne("한", file, conv);
+    assert.equal(after.matchCount, 1);
+    assert.deepEqual(after.matches, before.matches);
+    assert.equal(after.excludedMatchCount, before.excludedMatchCount);
+    store.close();
+  });
+});

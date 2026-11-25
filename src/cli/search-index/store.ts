@@ -358,12 +358,11 @@ export class SearchStore {
         tiers: excluded,
       });
       if (direct !== null) {
-        const row = this.#db
-          .prepare(
-            `SELECT COUNT(*) AS n FROM rows_content WHERE ${direct.where}`,
-          )
-          .get(...direct.params) as { n: number };
-        return row.n;
+        const row = this.#directQuery(
+          `SELECT COUNT(*) AS n FROM rows_content INDEXED BY rows_content_path WHERE ${direct.where}`,
+          (stmt) => stmt.get(...direct.params) as { n: number },
+        );
+        if (row !== null) return row.n;
       }
     }
     const { fromWhere, params } = this.#fromWhere(query, onlyPath, {
@@ -392,11 +391,11 @@ export class SearchStore {
     if (onlyPath !== null) {
       const direct = this.#directOne(query, onlyPath, filters);
       if (direct !== null) {
-        return this.#db
-          .prepare(
-            `SELECT c0 AS path, c1 AS tier, c3 AS ts, id AS rowid FROM rows_content WHERE ${direct.where}`,
-          )
-          .all(...direct.params) as unknown as Hit[];
+        const hits = this.#directQuery(
+          `SELECT c0 AS path, c1 AS tier, c3 AS ts, id AS rowid FROM rows_content INDEXED BY rows_content_path WHERE ${direct.where}`,
+          (stmt) => stmt.all(...direct.params) as unknown as Hit[],
+        );
+        if (hits !== null) return hits;
       }
     }
     const { fromWhere, params } = this.#fromWhere(query, onlyPath, filters);
@@ -413,6 +412,24 @@ export class SearchStore {
    * `LIKE`로 거른다. 인덱스가 없거나, 대소문자가 있는 비ASCII 글자가 든 낱말(`LIKE`는
    * ASCII만 대소문자를 접는다)이면 null이라 FTS 경로로 찾는다.
    */
+  /**
+   * 경로 인덱스를 고정해(`INDEXED BY`) 질의한다. `rows_content`에 인덱스가 더 있으면
+   * 플래너가 다른 인덱스를 골라 같은 질의가 수십 배 느려진 적이 있다(종류 인덱스를 고르면
+   * 0.09초가 5.8초). 인덱스가 사라졌거나 질의가 실패하면 쓰지 않도록 표시하고 null을 돌려
+   * 줘 FTS 경로로 찾게 한다.
+   */
+  #directQuery<T>(
+    sql: string,
+    run: (stmt: ReturnType<DatabaseSync["prepare"]>) => T,
+  ): T | null {
+    try {
+      return run(this.#db.prepare(sql));
+    } catch {
+      this.#pathIndexed = false;
+      return null;
+    }
+  }
+
   #directOne(
     query: string,
     filePath: string,
