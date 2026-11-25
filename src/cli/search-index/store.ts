@@ -407,39 +407,13 @@ export class SearchStore {
       .all(...params) as unknown as Hit[];
   }
 
-  /**
-   * 세션 하나 검색의 조건. FTS의 `path` 열은 인덱스가 없어 한 세션을 찾아도 매치가 있는
-   * 모든 행의 경로를 읽는다. 내용 테이블의 경로 인덱스로 그 세션의 행만 고르고 낱말마다
-   * `LIKE`로 거른다. 인덱스가 없거나, 대소문자가 있는 비ASCII 글자가 든 낱말(`LIKE`는
-   * ASCII만 대소문자를 접는다)이면 null이라 FTS 경로로 찾는다.
-   */
+  /** 경로 인덱스가 있고 낱말이 `LIKE`로 같은 결과를 낼 때만 직접 질의 조건을 돌려준다. */
   #directOne(
     query: string,
     filePath: string,
     filters: SearchFilters,
   ): { where: string; params: (string | number)[] } | null {
-    if (!this.#pathIndexed) return null;
-    const terms = searchTerms(query);
-    if (terms.some(hasCasedNonAscii)) return null;
-    const where = ["c0 = ?"];
-    const params: (string | number)[] = [filePath];
-    for (const term of terms) {
-      where.push("c4 LIKE ? ESCAPE '\\'");
-      params.push(`%${term.replace(/[\\%_]/g, (c) => `\\${c}`)}%`);
-    }
-    if (filters.since !== null) {
-      where.push("c3 >= ?");
-      params.push(filters.since);
-    }
-    if (filters.until !== null) {
-      where.push("c3 < ?");
-      params.push(filters.until);
-    }
-    if (filters.tiers !== null) {
-      where.push(`c1 IN (${filters.tiers.map(() => "?").join(", ")})`);
-      params.push(...filters.tiers.map((t) => TIERS.indexOf(t)));
-    }
-    return { where: where.join(" AND "), params };
+    return this.#pathIndexed ? directOneWhere(query, filePath, filters) : null;
   }
 
   /**
@@ -654,6 +628,47 @@ function compareTsDesc(a: string | null, b: string | null): number {
   if (a === null) return 1;
   if (b === null) return -1;
   return a < b ? 1 : -1;
+}
+
+/**
+ * 세션 하나 검색의 조건(`rows_content` 열 이름). FTS의 `path` 열은 인덱스가 없어 한 세션을
+ * 찾아도 매치가 있는 모든 행의 경로를 읽는다. 내용 테이블의 경로 인덱스(`c0`)로 그 세션의
+ * 행만 고르고 낱말마다 `LIKE`로 거른다. `LIKE`는 ASCII만 대소문자를 접으므로 대소문자가 있는
+ * 비ASCII 글자가 든 낱말이면 null이라 FTS 경로로 찾는다.
+ *
+ * `c0` 말고 인덱스를 탈 수 있는 열(`c1`·`c3`)에는 단항 `+`를 붙여 인덱스 후보에서 뺀다.
+ * 지금 계획을 바꾸는 것은 `+c1`이다. 통계가 없는 플래너는 `c3` 범위보다 `c0` 등호를 먼저
+ * 고르므로 `+c3`는 통계(`ANALYZE`)가 생길 때를 대비한 것이다.
+ * `rows_content`에 인덱스가 더 있으면 플래너가 그쪽을 골라 같은 질의가 수십 배 느려진 적이
+ * 있다(종류 인덱스를 고르면 0.09초가 5.8초). `INDEXED BY`는 쓰지 않는다 — 인덱스가 없으면
+ * 오류가 나는 마지막 수단이고, 단항 `+`는 인덱스가 없어도 질의가 돈다.
+ */
+export function directOneWhere(
+  query: string,
+  filePath: string,
+  filters: SearchFilters,
+): { where: string; params: (string | number)[] } | null {
+  const terms = searchTerms(query);
+  if (terms.some(hasCasedNonAscii)) return null;
+  const where = ["c0 = ?"];
+  const params: (string | number)[] = [filePath];
+  for (const term of terms) {
+    where.push("c4 LIKE ? ESCAPE '\\'");
+    params.push(`%${term.replace(/[\\%_]/g, (c) => `\\${c}`)}%`);
+  }
+  if (filters.since !== null) {
+    where.push("+c3 >= ?");
+    params.push(filters.since);
+  }
+  if (filters.until !== null) {
+    where.push("+c3 < ?");
+    params.push(filters.until);
+  }
+  if (filters.tiers !== null) {
+    where.push(`+c1 IN (${filters.tiers.map(() => "?").join(", ")})`);
+    params.push(...filters.tiers.map((t) => TIERS.indexOf(t)));
+  }
+  return { where: where.join(" AND "), params };
 }
 
 /** ASCII가 아니면서 대소문자가 있는 글자가 든 문자열. 한글·한자·숫자는 해당하지 않는다. */
