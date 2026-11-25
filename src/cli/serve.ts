@@ -373,6 +373,9 @@ export function createRequestHandler(
           matchCount,
           indexReady: body.index.ready,
           durationMs: body.durationMs,
+          workerMs: r.durationMs,
+          syncMs: r.syncMs,
+          syncedFiles: r.syncedFiles,
           searchId,
         });
         return body;
@@ -454,6 +457,9 @@ export function createRequestHandler(
           matchCount: r.matchCount,
           indexReady: body.index.ready,
           durationMs: body.durationMs,
+          workerMs: r.durationMs,
+          syncMs: r.syncMs,
+          syncedFiles: r.syncedFiles,
         });
         return body;
       });

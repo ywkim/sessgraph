@@ -513,8 +513,26 @@ test("serve: 검색과 결과에서 누른 귀속 요청을 검색 기록에 남
         [all.searchId, undefined, undefined],
       );
 
+      // 검색 줄은 시간을 나눠 남긴다: 동기화 ≤ 워커 ≤ 전체
+      for (const e of events.filter(
+        (e) => (e as { kind?: string }).kind === "search",
+      )) {
+        const t = e as {
+          durationMs: number;
+          workerMs: number;
+          syncMs: number;
+          syncedFiles: number;
+        };
+        assert.ok(t.syncMs >= 0 && t.syncMs <= t.workerMs);
+        assert.ok(t.workerMs <= t.durationMs);
+        assert.ok(Number.isInteger(t.syncedFiles) && t.syncedFiles >= 0);
+      }
+
       const strip = ({
         durationMs: _d,
+        workerMs: _w,
+        syncMs: _m,
+        syncedFiles: _f,
         searchId: _s,
         ...rest
       }: Record<string, unknown>) => rest;
