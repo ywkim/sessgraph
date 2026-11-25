@@ -92,10 +92,16 @@ export function excludedTiers(input: FilterInput): Tier[] {
   return TIER_ORDER.filter((t) => !input.tiers.has(t));
 }
 
+/** 체크하지 않은 종류의 이름("도구·기타"). 없으면 "". */
+export function excludedTierNames(input: FilterInput): string {
+  return excludedTiers(input)
+    .map((t) => TIER_NAME[t])
+    .join("·");
+}
+
 /** 제외된 종류의 매치가 더 있다는 안내 문구. 건수가 0이거나 제외한 종류가 없으면 "". */
 export function describeExcluded(input: FilterInput, count: number): string {
-  const tiers = excludedTiers(input);
-  if (count <= 0 || tiers.length === 0) return "";
-  const names = tiers.map((t) => TIER_NAME[t]).join("·");
+  const names = excludedTierNames(input);
+  if (count <= 0 || names === "") return "";
   return `${names}에도 ${count.toLocaleString("ko-KR")}건 더 있습니다`;
 }

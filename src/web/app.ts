@@ -41,6 +41,7 @@ import {
   describeExcluded,
   describeFilters,
   excludedTiers,
+  excludedTierNames,
   filterQuery,
   type FilterInput,
 } from "./search-filters.js";
@@ -916,7 +917,7 @@ async function showExcluded(
   // 조건 줄은 이 함수가 시작된 뒤 맨 위에 붙으므로 이 줄은 그 아래에 놓인다
   const pending = Object.assign(document.createElement("p"), {
     className: "muted search-excluded-pending",
-    textContent: "도구·기타 건수를 세는 중…",
+    textContent: `${excludedTierNames(input)} 건수를 세는 중…`,
   });
   searchResultsEl.prepend(pending);
   try {
@@ -929,7 +930,7 @@ async function showExcluded(
     else pending.replaceWith(excludedNote(text, input));
   } catch {
     if (seq !== searchSeq) return;
-    pending.textContent = "도구·기타 건수를 세지 못했습니다";
+    pending.textContent = `${excludedTierNames(input)} 건수를 세지 못했습니다`;
   }
 }
 
