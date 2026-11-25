@@ -1,4 +1,4 @@
-import test from "node:test";
+import test, { after } from "node:test";
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import type { Server } from "node:http";
@@ -9,6 +9,7 @@ import {
   mkdtempSync,
   readFileSync,
   renameSync,
+  rmSync,
   statSync,
   writeFileSync,
 } from "node:fs";
@@ -38,6 +39,14 @@ import type {
   SessionSearchResponse,
   SessionSummary,
 } from "../core/types.js";
+
+// `--cache-dir` 없이 runServe를 띄우는 시험이 사용자의 실제 색인(~/.cache/sessgraph)을
+// 열고 시험 픽스처를 그 색인에 동기화하지 않게 한다
+const privateCacheHome = mkdtempSync(
+  path.join(tmpdir(), "sessgraph-serve-xdg-"),
+);
+process.env.XDG_CACHE_HOME = privateCacheHome;
+after(() => rmSync(privateCacheHome, { recursive: true, force: true }));
 
 const fixturesDir = path.join(
   path.dirname(fileURLToPath(import.meta.url)),
