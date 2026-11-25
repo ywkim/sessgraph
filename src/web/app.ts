@@ -18,6 +18,7 @@ import type {
   MatchAttribution,
   SearchHit,
   SearchMatch,
+  ExcludedResponse,
   RelaxedResponse,
   SearchResponse,
   SessionSearchResponse,
@@ -869,10 +870,13 @@ async function runSearch(query: string, input: FilterInput): Promise<void> {
         `/api/search?q=${encodeURIComponent(query)}${conditions}`,
       );
       if (seq !== searchSeq) return;
-      excludedMatchCount = result.excludedMatchCount;
       renderMultiSessionResults(result);
       if (result.sessions.length === 0) {
         void showRelaxed(query, conditions, seq);
+      }
+      // 빠진 종류의 건수는 흔한 낱말이면 본 검색보다 오래 걸려 따로 받는다
+      if (describeExcluded(input, 1) !== "") {
+        void showExcluded(query, conditions, input, seq);
       }
     }
     shownFilterQuery = conditions;
@@ -895,6 +899,32 @@ async function runSearch(query: string, input: FilterInput): Promise<void> {
     searchResultsEl.append(
       errorLine(`검색하지 못했습니다: ${(err as Error).message}`),
     );
+  }
+}
+
+/**
+ * 전 세션 검색의 "도구·기타에도 N건 더 있습니다" 안내. 결과를 먼저 그리고 건수는
+ * 나중에 받아 조건 줄 아래에 끼운다. 그 사이 다른 검색이 시작됐으면 버린다.
+ */
+async function showExcluded(
+  query: string,
+  conditions: string,
+  input: FilterInput,
+  seq: number,
+): Promise<void> {
+  try {
+    const r = await getJson<ExcludedResponse>(
+      `/api/search/excluded?q=${encodeURIComponent(query)}${conditions}`,
+    );
+    if (seq !== searchSeq) return;
+    const text = describeExcluded(input, r.excludedMatchCount);
+    if (text === "") return;
+    const note = excludedNote(text, input);
+    const conditionsLine = searchResultsEl.querySelector(".search-conditions");
+    if (conditionsLine) conditionsLine.after(note);
+    else searchResultsEl.prepend(note);
+  } catch {
+    // 덧붙이는 안내라 실패해도 결과는 그대로 둔다
   }
 }
 

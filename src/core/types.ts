@@ -488,6 +488,12 @@ export interface SearchResponse {
   readonly sessions: readonly SessionHits[];
   /** 매치가 있는 세션이 50개를 넘어 잘렸으면 true */
   readonly truncatedSessions: boolean;
+  readonly durationMs: number;
+}
+
+/** `/api/search/excluded` */
+export interface ExcludedResponse {
+  readonly query: string;
   /** 종류 조건 때문에 빠진 매치의 수. 종류 조건이 없으면 0 */
   readonly excludedMatchCount: number;
   readonly durationMs: number;

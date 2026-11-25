@@ -31,6 +31,7 @@ import type { SearchLog, SearchLogEvent } from "./search-log.js";
 import type {
   IndexResult,
   NodeBody,
+  ExcludedResponse,
   RelaxedResponse,
   SearchResponse,
   SegmentDetail,
@@ -367,6 +368,50 @@ test("serve: /api/search/relaxed는 낱말 하나를 뺀 검색의 세션 수를
     assert.equal((await fetch(`${base}/api/search/relaxed?q=`)).status, 400);
     assert.equal(
       (await fetch(`${base}/api/search/relaxed?q=renew&tiers=bad`)).status,
+      400,
+    );
+  });
+});
+
+test("serve: /api/search는 빠진 종류의 건수를 싣지 않고 /api/search/excluded가 따로 센다", async () => {
+  const tool =
+    JSON.stringify({
+      type: "assistant",
+      uuid: U(2),
+      parentUuid: U(1),
+      timestamp: "2026-01-01T00:00:01.000Z",
+      message: {
+        content: [
+          { type: "tool_use", id: "x", input: { command: "grep needle" } },
+        ],
+      },
+    }) + "\n";
+  const file = sessionFile(
+    "s.jsonl",
+    convLine(U(1), null, "needle talk") + tool,
+  );
+  await withSearchServer([file], async (base) => {
+    const search = await fetch(
+      `${base}/api/search?q=needle&tiers=conversation`,
+    );
+    const found = (await search.json()) as Record<string, unknown>;
+    assert.equal("excludedMatchCount" in found, false);
+    const res = await fetch(
+      `${base}/api/search/excluded?q=needle&tiers=conversation`,
+    );
+    assert.equal(res.status, 200);
+    const body = (await res.json()) as ExcludedResponse;
+    assert.equal(body.query, "needle");
+    assert.equal(body.excludedMatchCount, 1);
+    // 종류 조건이 없으면 빠진 것이 없다
+    const all = await fetch(`${base}/api/search/excluded?q=needle`);
+    assert.equal(
+      ((await all.json()) as ExcludedResponse).excludedMatchCount,
+      0,
+    );
+    assert.equal((await fetch(`${base}/api/search/excluded?q=`)).status, 400);
+    assert.equal(
+      (await fetch(`${base}/api/search/excluded?q=needle&tiers=bad`)).status,
       400,
     );
   });

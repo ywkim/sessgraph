@@ -22,6 +22,7 @@ import type {
   NodeBody,
   SearchFilters,
   SearchMatch,
+  ExcludedResponse,
   RelaxedResponse,
   SearchResponse,
   SessionSearchResponse,
@@ -344,7 +345,6 @@ export function createRequestHandler(
           index: indexStatus(r.index, byPath, []),
           sessions,
           truncatedSessions: r.truncatedSessions,
-          excludedMatchCount: r.excludedMatchCount,
           durationMs: performance.now() - start,
         };
         const matchCount = sessions.reduce((n, s) => n + s.matchCount, 0);
@@ -378,6 +378,25 @@ export function createRequestHandler(
           syncedFiles: r.syncedFiles,
           searchId,
         });
+        return body;
+      });
+      return;
+    }
+
+    // 종류를 일부만 골랐을 때 화면이 결과를 그린 뒤 부른다. 흔한 낱말이면 본
+    // 검색보다 오래 걸려 검색 응답과 나눈다
+    if (url.pathname === "/api/search/excluded") {
+      const q = validQuery(url, res);
+      if (q === null) return;
+      const filters = validFilters(url, res);
+      if (filters === null) return;
+      void respondSearch(res, search, async (client) => {
+        const r = await client.excludedAll(q, filters);
+        const body: ExcludedResponse = {
+          query: q,
+          excludedMatchCount: r.excludedMatchCount,
+          durationMs: r.durationMs,
+        };
         return body;
       });
       return;

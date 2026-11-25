@@ -223,7 +223,6 @@ export class SearchStore {
   ): {
     readonly sessions: PathHits[];
     readonly truncatedSessions: boolean;
-    readonly excludedMatchCount: number;
   } {
     const byPath = new Map<string, Hit[]>();
     for (const hit of this.#match(query, null, filters)) {
@@ -251,8 +250,19 @@ export class SearchStore {
     return {
       sessions,
       truncatedSessions: groups.length > SESSIONS_LIMIT,
-      excludedMatchCount: this.#excludedCount(query, null, filters, paths),
     };
+  }
+
+  /**
+   * 전 세션 검색에서 종류 조건 때문에 빠진 매치의 수 (Spec "제외된 종류의 건수").
+   * 흔한 낱말이면 본 검색보다 오래 걸려 검색 응답과 따로 부른다.
+   */
+  excludedAll(
+    query: string,
+    paths: ReadonlySet<string>,
+    filters: SearchFilters = NO_FILTERS,
+  ): number {
+    return this.#excludedCount(query, null, filters, paths);
   }
 
   /**

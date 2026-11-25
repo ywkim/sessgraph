@@ -112,6 +112,22 @@ function handle(req: SearchRequest): SearchReply {
         },
       };
     }
+    if (req.kind === "excluded") {
+      // 직전 전 세션 검색이 이미 색인을 맞췄으므로 다시 맞추지 않는다
+      const { eligible } = progress(store);
+      return {
+        id: req.id,
+        result: {
+          kind: "excluded",
+          excludedMatchCount: store.excludedAll(
+            req.query,
+            eligible,
+            req.filters,
+          ),
+          durationMs: performance.now() - start,
+        },
+      };
+    }
     const syncStart = performance.now();
     const syncedFiles = refresh(
       store,
@@ -127,7 +143,6 @@ function handle(req: SearchRequest): SearchReply {
         index,
         sessions: r.sessions,
         truncatedSessions: r.truncatedSessions,
-        excludedMatchCount: r.excludedMatchCount,
         durationMs: performance.now() - start,
         syncMs,
         syncedFiles,
