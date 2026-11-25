@@ -4,11 +4,16 @@
  */
 
 /**
- * Spec "검색어의 낱말" — 공백으로 나눈 낱말(중복 제거). 검색어 전체가 큰따옴표로
- * 감싸여 있으면 안쪽을 낱말 하나로 보고, 공백뿐인 검색어는 그대로 낱말 하나다.
+ * Spec "검색어의 낱말" — 공백으로 나눈 낱말(중복 제거). 검색어 전체가 큰따옴표
+ * (곧은 `"`와 둥근 `“ ”`)로 감싸여 있으면 안쪽을 낱말 하나로 보고, 공백뿐인
+ * 검색어는 그대로 낱말 하나다.
  */
 export function searchTerms(query: string): string[] {
-  if (query.length > 2 && query.startsWith('"') && query.endsWith('"')) {
+  if (
+    query.length > 2 &&
+    '"“'.includes(query[0]!) &&
+    '"”'.includes(query[query.length - 1]!)
+  ) {
     return [query.slice(1, -1)];
   }
   const terms = [...new Set(query.split(/\s+/).filter((t) => t !== ""))];
