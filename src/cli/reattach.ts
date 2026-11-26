@@ -1,5 +1,6 @@
 import {
   accessSync,
+  chmodSync,
   constants as fsConstants,
   copyFileSync,
   createReadStream,
@@ -9,6 +10,7 @@ import {
   openSync,
   closeSync,
   appendFileSync,
+  statSync,
 } from "node:fs";
 import { rename } from "node:fs/promises";
 import { pipeline } from "node:stream/promises";
@@ -218,6 +220,7 @@ export async function applyReattach(
     throw new Error(`쓰기 권한이 없습니다: ${filePath}`);
   }
   assertNoOtherOpenHandles(filePath);
+  const fileMode = statSync(filePath).mode & 0o777;
 
   const originalLine = readLineAt(
     filePath,
@@ -239,6 +242,9 @@ export async function applyReattach(
 
   const tempPath = `${filePath}.tmp.${process.pid}.${Date.now()}`;
   await writeReplacedFile(filePath, tempPath, target, newLine);
+  // 임시 파일은 기본 모드(umask 적용)로 만들어지므로 원본 모드를 되돌려 놓는다.
+  // 세션 파일은 자격증명을 담고 있어, 교체가 0600을 0644로 넓히면 안 된다.
+  chmodSync(tempPath, fileMode);
   await rename(tempPath, filePath);
 
   const surgeryLogPath = `${filePath}.surgery.log`;
@@ -251,12 +257,26 @@ export async function applyReattach(
     reason: plan.reason,
     backupPath,
   };
-  appendFileSync(surgeryLogPath, `${JSON.stringify(entry)}\n`);
+  appendSurgeryLog(surgeryLogPath, entry, fileMode);
 
   return {
     result: { plan, committed: true, backupPath, surgeryLogPath },
     warnings,
   };
+}
+
+/**
+ * 수술 로그에 한 줄을 덧붙인다. 로그를 새로 만들 때는 `mode`(세션 파일의 모드)로
+ * 맞춘다 — 사유 문장이 들어가므로 세션 파일보다 넓은 권한으로 만들지 않는다.
+ */
+export function appendSurgeryLog(
+  logPath: string,
+  entry: SurgeryLogEntry,
+  mode: number,
+): void {
+  const existed = existsSync(logPath);
+  appendFileSync(logPath, `${JSON.stringify(entry)}\n`);
+  if (!existed) chmodSync(logPath, mode);
 }
 
 function readLineAt(
