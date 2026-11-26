@@ -4,7 +4,11 @@ import { readFileSync, writeFileSync, unlinkSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 
-import { buildIndex, buildIndexFromFile } from "./build-index.js";
+import {
+  buildIndex,
+  buildIndexDetailed,
+  buildIndexFromFile,
+} from "./build-index.js";
 import type { IndexResult } from "./types.js";
 
 const fixturesDir = path.join(
@@ -135,13 +139,12 @@ for (const name of structuralFixtures) {
   });
 }
 
-test("buildIndexFromFile: 1MB 청크 경계에 걸친 줄도 안 끊고 하나로 읽는다", () => {
-  // duplicate-parents 픽스처를 반복 결합해 최소 하나의 줄 경계가
-  // CHUNK_SIZE(1MB) 배수 근처에 오도록 만든다. 청크가 줄 중간에서 끊겨도
-  // 다음 청크와 이어붙여 온전한 한 줄로 파싱되는지 확인한다
-  // (buildIndexFromFile "청크 경계" 처리).
+test("buildIndexFromFile: 반복 결합한 작은 파일도 buildIndex(text)와 같게 읽는다", () => {
+  // duplicate-parents 픽스처를 400번 이어 붙인 약 283KB 파일이다. CHUNK_SIZE(1MB)
+  // 경계를 넘지 않으므로 청크 경계 시험이 아니다. 청크 경계는 아래
+  // "청크 경계" 시험들이 다룬다.
   const base = readFixture("duplicate-parents").trimEnd();
-  const repeated = Array(400).fill(base).join("\n"); // 약 1.x MB
+  const repeated = Array(400).fill(base).join("\n");
   const tmpPath = path.join(fixturesDir, ".tmp-chunk-boundary.jsonl");
   writeFileSync(tmpPath, repeated);
   try {
@@ -153,6 +156,112 @@ test("buildIndexFromFile: 1MB 청크 경계에 걸친 줄도 안 끊고 하나�
   } finally {
     unlinkSync(tmpPath);
   }
+});
+
+const CHUNK_BYTES = 1024 * 1024; // build-index.ts의 CHUNK_SIZE와 같은 값
+
+/**
+ * 구조 필드만 가진 합성 선형 체인 한 줄(줄바꿈 제외)을 정확히 `lineBytes`
+ * 바이트로 만든다. 길이는 ASCII `pad` 필드로 맞춘다.
+ */
+function chainLine(i: number, lineBytes: number): string {
+  const uuid = `00000000-0000-4000-8000-${String(i + 1).padStart(12, "0")}`;
+  const parent =
+    i === 0
+      ? "null"
+      : `"00000000-0000-4000-8000-${String(i).padStart(12, "0")}"`;
+  const head = `{"uuid":"${uuid}","parentUuid":${parent},"type":"user","timestamp":"2026-01-01T00:00:00.000Z","pad":"`;
+  const tail = `"}`;
+  const padLen = lineBytes - head.length - tail.length;
+  assert.ok(padLen >= 0, `줄 길이 ${lineBytes}B가 최소 길이보다 짧다`);
+  return head + "x".repeat(padLen) + tail;
+}
+
+/** 줄 길이 목록으로 체인 파일을 만들어 임시 경로에 쓰고 본문을 돌려준다. */
+function writeChain(tmpPath: string, lineBytes: readonly number[]): string {
+  const text = lineBytes.map((n, i) => chainLine(i, n)).join("\n") + "\n";
+  writeFileSync(tmpPath, text);
+  return text;
+}
+
+/** 줄 길이 `len`인 줄을 `count`개 반복한 길이 목록. */
+function repeatLen(len: number, count: number): number[] {
+  return Array<number>(count).fill(len);
+}
+
+/**
+ * 파일 읽기 결과가 파일 전체를 문자열로 읽은 결과와 노드·세그먼트·orphan·
+ * 깨진 줄·줄 번호·바이트 오프셋까지 같고, 모든 노드의 byteOffset이 줄 시작인지
+ * 확인한다.
+ */
+function assertFileMatchesText(tmpPath: string, text: string): void {
+  const fromText = withoutDuration(buildIndex(text));
+  const fromFile = withoutDuration(buildIndexFromFile(tmpPath));
+  assert.deepEqual(fromFile, fromText);
+
+  const buf = Buffer.from(text, "utf8");
+  for (const [uuid, node] of buildIndexDetailed(tmpPath).nodes) {
+    assert.ok(
+      node.byteOffset === 0 || buf[node.byteOffset - 1] === 0x0a,
+      `${uuid}의 byteOffset ${node.byteOffset}이 줄 시작이 아니다`,
+    );
+  }
+}
+
+function withTmpFile(name: string, run: (tmpPath: string) => void): void {
+  const tmpPath = path.join(fixturesDir, name);
+  try {
+    run(tmpPath);
+  } finally {
+    try {
+      unlinkSync(tmpPath);
+    } catch {
+      // 파일이 만들어지기 전에 실패한 경우
+    }
+  }
+}
+
+test("buildIndexFromFile: 청크 경계 — 첫 경계가 줄 중간이고 파일이 청크의 2.5배를 넘어도 한 체인으로 읽는다", () => {
+  // 줄 길이 1,000B는 1MiB로 나누어떨어지지 않아 첫 경계가 줄 중간에 온다.
+  // 약 2.6MB 이상이어야 두 번째 읽기가 첫 청크의 미완성 줄 자리를 덮어쓴다.
+  withTmpFile(".tmp-chunk-mid-line.jsonl", (tmpPath) => {
+    const lens = repeatLen(1000, 2700);
+    const text = writeChain(tmpPath, lens);
+    assert.ok(Buffer.byteLength(text) > CHUNK_BYTES * 2.5);
+    assertFileMatchesText(tmpPath, text);
+    const result = buildIndexFromFile(tmpPath);
+    assert.equal(result.malformedLines.length, 0);
+    assert.equal(result.nodeCount, lens.length);
+    assert.equal(result.segments.length, 1);
+    assert.equal(result.segments[0]!.nodeCount, lens.length);
+  });
+});
+
+test("buildIndexFromFile: 청크 경계 — 줄 길이가 달라도(300B·1,023B·3,000B) 같은 결과", () => {
+  for (const len of [300, 1023, 3000]) {
+    withTmpFile(`.tmp-chunk-len-${len}.jsonl`, (tmpPath) => {
+      const count = Math.ceil((CHUNK_BYTES * 2.7) / (len + 1));
+      const text = writeChain(tmpPath, repeatLen(len, count));
+      assertFileMatchesText(tmpPath, text);
+    });
+  }
+});
+
+test("buildIndexFromFile: 청크 경계 — 첫 경계가 줄바꿈에서 정확히 끝나면 그 다음 경계도 안전하다", () => {
+  // 앞 1MiB는 줄 길이 1,023B(+개행 = 1,024B) 1,024줄이라 첫 청크가 줄바꿈에서
+  // 정확히 끝난다. 이어지는 줄은 1,000B라 두 번째 경계는 줄 중간에 온다.
+  // 직전 청크가 줄바꿈으로 끝나 pending이 비어 있던 청크의 끝에서도 같은
+  // 결함이 생기는지 본다.
+  withTmpFile(".tmp-chunk-exact-then-mid.jsonl", (tmpPath) => {
+    const lens = [...repeatLen(1023, 1024), ...repeatLen(1000, 3000)];
+    const text = writeChain(tmpPath, lens);
+    assert.equal(
+      Buffer.byteLength(text.slice(0, 1024 * 1024)),
+      CHUNK_BYTES,
+      "첫 청크가 줄바꿈에서 정확히 끝나야 한다",
+    );
+    assertFileMatchesText(tmpPath, text);
+  });
 });
 
 /** 파일을 직접 훑어 uuid가 있는 줄을 찾고, 그 줄만 슬라이스해도 같은 uuid로 파싱되는지 확인한다. */
