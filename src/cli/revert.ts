@@ -21,6 +21,7 @@ import type {
   SurgeryLogEntry,
 } from "../core/types.js";
 import { errorEnvelope, okEnvelope, printEnvelope } from "./envelope.js";
+import { assertNoOtherOpenHandles } from "./open-handles.js";
 import { uniqueBackupPath } from "./reattach.js";
 
 export async function runRevert(
@@ -143,6 +144,11 @@ export async function runRevert(
       `쓰기 권한이 없습니다: ${file}`,
       write,
     );
+  }
+  try {
+    assertNoOtherOpenHandles(file);
+  } catch (err) {
+    return fail(json, "FILE_NOT_WRITABLE", (err as Error).message, write);
   }
 
   const preRevertBackupPath = uniqueBackupPath(file);

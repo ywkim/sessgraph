@@ -4,7 +4,7 @@ status: Current
 related:
   prd: docs/prd/20260902-0411-revert-command.prd.md
   design: docs/design/20260902-0411-revert-command.tdd.md
-updated: 2026-09-03
+updated: 2026-11-26
 ---
 
 # Spec: `revert` 명령
@@ -75,6 +75,7 @@ interface RevertResult {
 - 대상 항목 중 하나 이상의 `backupPath`가 파일 시스템에 없음 → **부분 복원하지 않고 즉시 중단**, 종료 코드 2, 어느 항목의 백업이 없는지 timestamp와 함께 명시 (ADR-0004: 애매한 상태에서 추측하지 않는다)
 - `--commit` 없이 실행 (dry-run) → 계획만 출력. 자기 백업·파일 교체·로그 추가 어느 것도 하지 않음
 - `--commit`으로 실행했으나 쓰기 권한 없음 → 종료 코드 2. 자기 백업 생성 전 단계에서 권한을 먼저 확인해, 백업만 만들고 복원에 실패하는 중간 상태를 피한다 (`reattach` Spec과 동일 원칙)
+- `--commit`으로 실행했으나 다른 프로세스가 대상 파일을 열고 있거나 `lsof`로 확인할 수 없음 → 종료 코드 2(`FILE_NOT_WRITABLE`), 자기 백업 생성 전에 중단한다 (`reattach` Spec과 동일 원칙·이유)
 - 되돌리기 직전 자기 백업의 타임스탬프가 기존 백업과 충돌 (같은 초 안에 재시도) → `reattach` Spec의 백업 파일명 충돌 규칙(일련번호 부여, 기존 백업 미덮어씀)을 그대로 따른다
 - 복원 후 `verify`와 동일한 방식으로 재계산한 체인 길이가 `RevertPlan.expectedChainLength`와 다름 → 이 경우는 복원 로직 자체의 결함(백업이 손상됐거나 잘못된 파일이 선택됨)을 뜻하므로 조용히 성공으로 보고하지 않고 경고와 함께 종료 코드 2
 
