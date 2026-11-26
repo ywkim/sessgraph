@@ -26,7 +26,7 @@
 5. `{file}.surgery.log`에 append-only 한 줄을 남긴다 — 시각, 대상 uuid, 이전/이후 부모, 사유, 백업 경로
 6. `--reason`은 필수다. 왜 그 지점을 골랐는지가 남지 않으면 나중에 백업 diff를 역추적해야 한다
 7. **다른 프로세스가 파일을 쓰기로 열고 있으면 교체하지 않는다.** `rename`은 새 inode를 만들어, 파일을 append로 열어 둔 프로세스의 이후 레코드가 사라지고 종료 코드 0으로 끝난다. 교체 전에 `assertNoOtherOpenHandles`(`src/cli/open-handles.ts`)를 호출한다. `lsof`로 확인하지 못해도 중단한다. 파일을 교체하는 명령을 더하면 이 호출도 더한다 — 기계 검사: `open-handles.test.ts`가 `reattach`·`revert` 각각을 시험한다(새 명령은 직접 더해야 하므로 호출 누락 자체는 기계적 강제가 아니다)
-8. **교체한 파일의 권한 모드는 원본을 유지한다.** 세션 파일은 자격증명을 담고 있어 0600이 0644로 넓어지면 안 된다. 임시 파일은 기본 모드로 만들어지므로 `rename` 전에 원본 모드로 `chmod`하고, 수술 로그는 `appendSurgeryLog`(`src/cli/reattach.ts`)로 쓴다. 기계 검사: `surgery-file-mode.test.ts`가 `reattach`·`revert` 각각의 파일·로그·백업 모드를 시험한다(새 교체 명령은 직접 더해야 한다)
+8. **교체한 파일의 권한 모드는 원본을 유지한다.** 세션 파일은 자격증명이 섞인 텍스트라 소유자 전용 권한을 이어 가야 한다([ADR-0008](../../docs/adr/ADR-0008-persistent-search-index-sqlite-fts5.md)). 임시 파일은 만들 때 원본 모드를 주고(umask가 가린 비트는 `rename` 전 `chmod`로 되돌린다), 수술 로그는 `appendSurgeryLog`(`src/cli/reattach.ts`)로 쓴다. 기계 검사: `surgery-file-mode.test.ts`가 `reattach`·`revert` 각각의 파일·로그·백업 모드를 시험한다(새 교체 명령은 직접 더해야 한다)
 
 ## 보고 규칙
 

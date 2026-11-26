@@ -99,7 +99,9 @@ for (const mode of [0o600, 0o640]) {
 
       assert.equal(modeOf(filePath), label);
       assert.equal(modeOf(`${filePath}.surgery.log`), label);
-      for (const backup of readdirSync(dir).filter((f) => f.includes(".bak."))) {
+      for (const backup of readdirSync(dir).filter((f) =>
+        f.includes(".bak."),
+      )) {
         assert.equal(modeOf(path.join(dir, backup)), label);
       }
     } finally {
