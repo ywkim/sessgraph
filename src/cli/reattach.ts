@@ -1,5 +1,6 @@
 import {
   accessSync,
+  chmodSync,
   constants as fsConstants,
   copyFileSync,
   createReadStream,
@@ -9,6 +10,7 @@ import {
   openSync,
   closeSync,
   appendFileSync,
+  statSync,
 } from "node:fs";
 import { rename } from "node:fs/promises";
 import { pipeline } from "node:stream/promises";
@@ -218,6 +220,7 @@ export async function applyReattach(
     throw new Error(`쓰기 권한이 없습니다: ${filePath}`);
   }
   assertNoOtherOpenHandles(filePath);
+  const fileMode = statSync(filePath).mode & 0o777;
 
   const originalLine = readLineAt(
     filePath,
@@ -238,7 +241,10 @@ export async function applyReattach(
   copyFileSync(filePath, backupPath, fsConstants.COPYFILE_EXCL);
 
   const tempPath = `${filePath}.tmp.${process.pid}.${Date.now()}`;
-  await writeReplacedFile(filePath, tempPath, target, newLine);
+  await writeReplacedFile(filePath, tempPath, target, newLine, fileMode);
+  // 만들 때 준 모드는 umask가 가린 비트가 있을 수 있어 rename 전에 원본 모드로 맞춘다.
+  // 세션 파일은 자격증명이 섞인 텍스트라 소유자 전용 권한을 이어 가야 한다(ADR-0008).
+  chmodSync(tempPath, fileMode);
   await rename(tempPath, filePath);
 
   const surgeryLogPath = `${filePath}.surgery.log`;
@@ -251,12 +257,26 @@ export async function applyReattach(
     reason: plan.reason,
     backupPath,
   };
-  appendFileSync(surgeryLogPath, `${JSON.stringify(entry)}\n`);
+  appendSurgeryLog(surgeryLogPath, entry, fileMode);
 
   return {
     result: { plan, committed: true, backupPath, surgeryLogPath },
     warnings,
   };
+}
+
+/**
+ * 수술 로그에 한 줄을 덧붙인다. 로그를 새로 만들 때는 `mode`(세션 파일의 모드)로
+ * 맞춘다 — 사유 문장이 들어가므로 세션 파일보다 넓은 권한으로 만들지 않는다.
+ */
+export function appendSurgeryLog(
+  logPath: string,
+  entry: SurgeryLogEntry,
+  mode: number,
+): void {
+  const existed = existsSync(logPath);
+  appendFileSync(logPath, `${JSON.stringify(entry)}\n`, { mode });
+  if (!existed) chmodSync(logPath, mode); // umask가 가린 비트를 되돌린다
 }
 
 function readLineAt(
@@ -312,8 +332,9 @@ async function writeReplacedFile(
   destPath: string,
   target: NodeIndex,
   newLine: string,
+  mode: number,
 ): Promise<void> {
-  const writeStream = createWriteStream(destPath);
+  const writeStream = createWriteStream(destPath, { mode });
   const before = target.byteOffset;
   const after = target.byteOffset + target.byteLength + 1; // +1: 원본 줄바꿈 건너뛰기
 

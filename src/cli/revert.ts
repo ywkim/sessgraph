@@ -1,10 +1,11 @@
 import {
   accessSync,
+  chmodSync,
   constants as fsConstants,
   copyFileSync,
   existsSync,
   readFileSync,
-  appendFileSync,
+  statSync,
 } from "node:fs";
 import { rename } from "node:fs/promises";
 import { parseArgs } from "node:util";
@@ -22,7 +23,7 @@ import type {
 } from "../core/types.js";
 import { errorEnvelope, okEnvelope, printEnvelope } from "./envelope.js";
 import { assertNoOtherOpenHandles } from "./open-handles.js";
-import { uniqueBackupPath } from "./reattach.js";
+import { appendSurgeryLog, uniqueBackupPath } from "./reattach.js";
 
 export async function runRevert(
   argv: readonly string[],
@@ -150,12 +151,15 @@ export async function runRevert(
   } catch (err) {
     return fail(json, "FILE_NOT_WRITABLE", (err as Error).message, write);
   }
+  const fileMode = statSync(file).mode & 0o777;
 
   const preRevertBackupPath = uniqueBackupPath(file);
   copyFileSync(file, preRevertBackupPath, fsConstants.COPYFILE_EXCL);
 
   const tempPath = `${file}.tmp.${process.pid}.${Date.now()}`;
   copyFileSync(plan.restoreFromBackup, tempPath);
+  // 복원할 백업의 모드가 아니라 지금 파일의 모드를 이어 간다.
+  chmodSync(tempPath, fileMode);
   await rename(tempPath, file);
 
   const entry: SurgeryLogEntry = {
@@ -165,7 +169,7 @@ export async function runRevert(
     reason: `되돌리기: ${plan.targetEntries.length}건 (${plan.targetEntries.map((e) => e.reason).join("; ")})`,
     backupPath: preRevertBackupPath,
   };
-  appendFileSync(surgeryLogPath, `${JSON.stringify(entry)}\n`);
+  appendSurgeryLog(surgeryLogPath, entry, fileMode);
 
   // 복원 후 실제 체인 길이가 계획과 일치하는지 확인한다 — 조용히 성공을
   // 보고하지 않는다 (Spec "엣지 케이스", ADR-0004).
