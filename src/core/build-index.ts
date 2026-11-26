@@ -300,9 +300,12 @@ function feedFile(acc: IndexAccumulator, filePath: string): void {
       if (bytesRead === 0) break;
       filePos += bytesRead;
 
+      // `chunk`는 매 읽기마다 덮어쓰이므로 `combined`와 그 뷰인 `pending`이
+      // 다음 읽기까지 살아남으려면 복사본이어야 한다. `pending`이 비어 있을 때
+      // `chunk`의 뷰를 그대로 쓰면 다음 `readSync`가 미완성 줄을 망가뜨린다.
       const combined =
         pending.length === 0
-          ? chunk.subarray(0, bytesRead)
+          ? Buffer.from(chunk.subarray(0, bytesRead))
           : Buffer.concat([pending, chunk.subarray(0, bytesRead)]);
 
       let searchFrom = 0;
