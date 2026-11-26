@@ -36,16 +36,17 @@ function makeSession(): { dir: string; filePath: string } {
   return { dir, filePath };
 }
 
-/** 파일을 append로 연 채 죽을 때까지 붙들고 있는 자식 프로세스. 열린 뒤에 반환한다. */
-async function holdOpen(filePath: string): Promise<ChildProcess> {
+/** 파일을 `flag`("a" 쓰기, "r" 읽기)로 연 채 죽을 때까지 붙들고 있는 자식 프로세스. 열린 뒤에 반환한다. */
+async function holdOpen(filePath: string, flag = "a"): Promise<ChildProcess> {
   const child = spawn(
     process.execPath,
     [
       "-e",
-      `require("node:fs").openSync(process.argv[1], "a");
+      `require("node:fs").openSync(process.argv[1], process.argv[2]);
        console.log("opened");
        setInterval(() => {}, 1000);`,
       filePath,
+      flag,
     ],
     { stdio: ["ignore", "pipe", "ignore"] },
   );
@@ -108,12 +109,26 @@ test("assertNoOtherOpenHandles: 다른 프로세스가 열고 있으면 PID를 �
   }
 });
 
-test("assertNoOtherOpenHandles: lsof를 실행하지 못하면 없다고 가정하지 않고 던진다", () => {
+test("assertNoOtherOpenHandles: 읽기 전용으로 연 프로세스는 막지 않는다", async () => {
+  const { dir, filePath } = makeSession();
+  const child = await holdOpen(filePath, "r");
+  try {
+    assertNoOtherOpenHandles(filePath);
+  } finally {
+    await release(child);
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("assertNoOtherOpenHandles: lsof를 실행하지 못하면 없다고 가정하지 않고 설치를 안내하며 던진다", () => {
   const { dir, filePath } = makeSession();
   try {
     assert.throws(
       () => assertNoOtherOpenHandles(filePath, "sessgraph-no-such-lsof"),
-      /확인하지 못했습니다/,
+      (err: Error) =>
+        err.message.includes("확인하지 못했습니다") &&
+        err.message.includes("설치") &&
+        !err.message.includes("세션을 종료한 뒤"),
     );
   } finally {
     rmSync(dir, { recursive: true, force: true });
