@@ -28,6 +28,7 @@ import type {
   SurgeryLogEntry,
 } from "../core/types.js";
 import { errorEnvelope, okEnvelope, printEnvelope } from "./envelope.js";
+import { assertNoOtherOpenHandles } from "./open-handles.js";
 
 export async function runReattach(
   argv: readonly string[],
@@ -216,6 +217,7 @@ export async function applyReattach(
   } catch {
     throw new Error(`쓰기 권한이 없습니다: ${filePath}`);
   }
+  assertNoOtherOpenHandles(filePath);
 
   const originalLine = readLineAt(
     filePath,
